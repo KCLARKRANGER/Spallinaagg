@@ -46,7 +46,7 @@ export const DRIVER_DATA: DriverEntry[] = [
   { id: "SMI43P", name: "Dale Lovejoy", status: "active", truckType: "Trailer", priority: 0 },
   { id: "SMI48P", name: "Bob Frost", status: "active", truckType: "Trailer", priority: 0 },
   { id: "SMI50P", name: "Ron Smith", status: "active", truckType: "Trailer", priority: 0 },
-  { id: "MMH6", name: "Tim Hampshire", status: "active", truckType: "Triaxle", priority: 0 },
+  { id: "MMH06", name: "Tim Hampshire", status: "active", truckType: "Triaxle", priority: 0 },
 ]
 
 // Add function to get all available truck types
