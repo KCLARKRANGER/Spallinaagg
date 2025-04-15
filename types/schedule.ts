@@ -12,6 +12,7 @@ export interface ScheduleEntry {
   qty: string
   materials: string
   notes: string
+  numTrucks?: string // Add this field
 }
 
 export interface ScheduleData {

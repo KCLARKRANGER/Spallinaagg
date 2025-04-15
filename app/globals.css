@@ -75,9 +75,11 @@
   body {
     width: 8.5in;
     height: 11in;
-    font-size: 12pt;
+    font-size: 10pt;
     background: white;
     color: black;
+    margin: 0;
+    padding: 0;
   }
 
   .print\:hidden {
@@ -129,7 +131,8 @@
   table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 10pt;
+    font-size: 9pt;
+    table-layout: fixed;
   }
 
   th,
@@ -137,7 +140,51 @@
     padding: 4pt;
     border: 1pt solid #000;
     text-align: left;
+    vertical-align: top;
+    overflow: hidden;
+    word-wrap: break-word;
   }
+
+  th {
+    background-color: #f0f0f0 !important;
+    font-weight: bold;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Column widths for better layout */
+  th:nth-child(1),
+  td:nth-child(1) {
+    width: 15%;
+  } /* Job Name */
+  th:nth-child(2),
+  td:nth-child(2) {
+    width: 6%;
+  } /* Start Time */
+  th:nth-child(3),
+  td:nth-child(3) {
+    width: 6%;
+  } /* Load Time */
+  th:nth-child(4),
+  td:nth-child(4) {
+    width: 20%;
+  } /* Location */
+  th:nth-child(5),
+  td:nth-child(5) {
+    width: 10%;
+  } /* Driver */
+  th:nth-child(6),
+  td:nth-child(6) {
+    width: 20%;
+  } /* Materials */
+  th:nth-child(7),
+  td:nth-child(7) {
+    width: 10%;
+  } /* Pit Location */
+  th:nth-child(8),
+  td:nth-child(8) {
+    width: 13%;
+  } /* Notes */
 
   /* Add page numbers */
   .page-number:after {
@@ -146,11 +193,14 @@
 
   /* Print header on each page */
   .print-header {
-    position: running(header);
     text-align: center;
-    font-size: 14pt;
-    font-weight: bold;
     margin-bottom: 0.25in;
+  }
+
+  .print-header h1 {
+    font-size: 16pt;
+    font-weight: bold;
+    margin-bottom: 4pt;
   }
 
   /* Truck type headers with colors */
@@ -158,14 +208,26 @@
     padding: 5pt;
     border-radius: 4pt;
     margin-bottom: 0.15in;
+    font-size: 14pt;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Footer with page numbers */
+  .print-footer {
+    position: fixed;
+    bottom: 0.25in;
+    width: 100%;
+    font-size: 8pt;
+    text-align: center;
   }
 
   @page {
-    @top-center {
-      content: element(header);
-    }
     @bottom-right {
       content: "Page " counter(page) " of " counter(pages);
+    }
+    @bottom-left {
+      content: "MM/dd/yyyy hh:mm a";
     }
   }
 }

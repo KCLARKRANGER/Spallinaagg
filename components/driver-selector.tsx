@@ -150,18 +150,33 @@ export function DriverSelector({ onSelectDriver, initialTruckType }: DriverSelec
                 <TableBody>
                   {filteredDrivers.length > 0 ? (
                     filteredDrivers.map((driver) => (
-                      <TableRow key={driver.id}>
+                      <TableRow key={driver.id} className={driver.id === "FIRST-RETURNING" ? "bg-amber-50" : undefined}>
                         <TableCell className="font-medium">{driver.id}</TableCell>
-                        <TableCell>{driver.name}</TableCell>
+                        <TableCell>
+                          {driver.id === "FIRST-RETURNING" ? (
+                            <span className="font-semibold text-amber-600">{driver.name}</span>
+                          ) : (
+                            driver.name
+                          )}
+                        </TableCell>
                         <TableCell>
                           {driver.truckType && (
                             <Badge variant="outline" className={getBadgeColorClass(driver.truckType)}>
                               {driver.truckType}
                             </Badge>
                           )}
+                          {driver.id === "FIRST-RETURNING" && (
+                            <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-200">
+                              Any Truck Type
+                            </Badge>
+                          )}
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button variant="ghost" size="sm" onClick={() => onSelectDriver(driver.name)}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => onSelectDriver(driver.id === "FIRST-RETURNING" ? driver.name : driver.name)}
+                          >
                             Select
                           </Button>
                         </TableCell>

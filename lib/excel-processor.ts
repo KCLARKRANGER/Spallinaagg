@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx"
 import type { ScheduleData, ScheduleEntry, TruckType } from "@/types/schedule"
 import { parseCSV } from "./csv-parser"
+import { assignMissingPitLocations } from "./pit-location-mapper"
 
 export async function processExcelFile(file: File): Promise<ScheduleData> {
   try {
@@ -52,7 +53,13 @@ export function processScheduleData(data: any[]): ScheduleData {
     // Map column names to our expected format based on the provided schema
     const jobName = row["Task Name"] || ""
     const truckType = (row["Truck Type (drop down)"] || "").toString().trim()
-    const pit = (row["Pit Location (drop down)"] || "").toString()
+
+    // Check for both "Pit Location (labels)" and "Pit Location (drop down)"
+    const pit = (row["Pit Location (labels)"] || row["Pit Location (drop down)"] || "")
+      .toString()
+      .replace(/^\[|\]$/g, "")
+      .trim() // Remove brackets if present
+
     const shift = (row["1st/2nd (labels)"] || "").toString()
     const driversAssigned = (row["Drivers Assigned (labels)"] || "").toString()
 
@@ -66,7 +73,10 @@ export function processScheduleData(data: any[]): ScheduleData {
     // }
 
     // With this code that assigns "Undefined" as the truck type:
-    const finalTruckType = truckType || "Undefined"
+    const finalTruckType = truckType || "Dump Truck"
+    if (!truckType) {
+      console.warn(`Warning: Row ${index} (${jobName}) has undefined truck type - assigning default "Dump Truck"`)
+    }
     console.log(`Row ${index} - Using truck type: ${finalTruckType}`)
 
     // Parse the due date
@@ -112,11 +122,28 @@ export function processScheduleData(data: any[]): ScheduleData {
       time = row["Time (short text)"].toString()
     }
 
-    const location = (row["LOCATION (location)"] || "").toString()
+    // Find the line where location is extracted and update it to use column I
+    // Replace this line:
+    // const location = (row["LOCATION (location)"] || "").toString()
+    const location = (
+      row["LOCATION (short text)"] ||
+      row["I"] ||
+      row["LOCATION (location)"] ||
+      row["Location"] ||
+      ""
+    ).toString()
     const qty = (row["QTY REQ'D (short text)"] || "").toString()
 
-    // Check for both possible material column names
-    const materials = (row["Material Type (drop down)"] || row["AGG. Materials (drop down)"] || "").toString()
+    // Check for all possible material column names
+    const materials = (
+      row["Material Type (short text)"] ||
+      row["Material Type (drop down)"] ||
+      row["AGG. Materials (drop down)"] ||
+      ""
+    ).toString()
+
+    // Log the materials value for debugging
+    console.log(`Row ${index} - Materials: ${materials}`)
 
     const notes = (row["Additional Delivery Notes (text)"] || "").toString()
 
@@ -156,7 +183,14 @@ export function processScheduleData(data: any[]): ScheduleData {
     }
 
     // Get the number of trucks required (from column M)
-    const numTrucksStr = (row["Number of Trucks"] || row["# of Trucks"] || "1").toString()
+    // Replace this line:
+    // const numTrucksStr = (row["Number of Trucks"] || row["# of Trucks"] || "1").toString()
+    const numTrucksStr = (
+      row["Number of Trucks (number)"] ||
+      row["Number of Trucks"] ||
+      row["# of Trucks"] ||
+      "1"
+    ).toString()
     let numTrucks = 1
 
     try {
@@ -192,6 +226,7 @@ export function processScheduleData(data: any[]): ScheduleData {
           qty,
           materials,
           notes,
+          numTrucks: numTrucksStr, // Add this line
         }
 
         allEntries.push(entry)
@@ -222,6 +257,7 @@ export function processScheduleData(data: any[]): ScheduleData {
           qty,
           materials,
           notes,
+          numTrucks: numTrucksStr, // Add this line
         }
 
         allEntries.push(entry)
@@ -250,6 +286,7 @@ export function processScheduleData(data: any[]): ScheduleData {
         qty,
         materials,
         notes,
+        numTrucks: numTrucksStr, // Add this line
       }
 
       allEntries.push(entry)
@@ -263,14 +300,22 @@ export function processScheduleData(data: any[]): ScheduleData {
     }
   })
 
+  // Assign missing pit locations based on material types
+  const entriesWithPits = assignMissingPitLocations(allEntries)
+
+  // Update the byTruckType entries with pit locations as well
+  Object.keys(byTruckType).forEach((type) => {
+    byTruckType[type] = assignMissingPitLocations(byTruckType[type])
+  })
+
   console.log("Processed data:", {
-    allEntries: allEntries.length,
+    allEntries: entriesWithPits.length,
     truckTypes: Object.keys(byTruckType),
     entriesByType: Object.entries(byTruckType).map(([type, entries]) => `${type}: ${entries.length}`),
   })
 
   return {
-    allEntries,
+    allEntries: entriesWithPits,
     byTruckType,
   }
 }

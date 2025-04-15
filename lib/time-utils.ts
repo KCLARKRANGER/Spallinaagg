@@ -94,6 +94,11 @@ export function convertTo24HourFormat(timeStr: string): string {
   }
 }
 
+// Add a function to format time
+export function formatTime(timeStr: string): string {
+  return convertTo24HourFormat(timeStr)
+}
+
 // Update print colors function to handle dynamic truck types
 export function getPrintTruckTypeColor(type: string): string {
   const colorMap: Record<string, string> = {

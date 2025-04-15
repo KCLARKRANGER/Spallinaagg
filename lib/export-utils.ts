@@ -1,41 +1,17 @@
-import type { ScheduleData, TruckType } from "@/types/schedule"
+import { jsPDF } from "jspdf"
+import autoTable from "jspdf-autotable"
+import type { ScheduleEntry } from "@/types/schedule"
 import { format } from "date-fns"
-import jsPDF from "jspdf"
 
-// Add this import at the top of the file
-import { DRIVER_DATA } from "@/lib/driver-data"
-
-// Mock DRIVER_DATA for demonstration purposes.  Replace with actual data source.
-// const DRIVER_DATA = [
-//   { id: "123", name: "John Doe" },
-//   { id: "456", name: "Jane Smith" },
-//   { id: "789", name: "Peter Jones" },
-//   { id: "101", name: "Alice Brown" },
-//   { id: "112", name: "Bob Williams" },
-// ];
-
-// Helper function to format truck/driver display for PDF
-function formatTruckDriverForPDF(truckDriver: string, pdf: jsPDF): { text: string; height: number } {
-  // Check if it's a truck number
-  if (/^(SMI)?\d+[Ps]?$/i.test(truckDriver)) {
-    const baseNumber = truckDriver.replace(/^SMI/i, "").replace(/[Ps]$/i, "")
-    const driver = DRIVER_DATA.find((d) => d.id === baseNumber)
-
-    if (driver && driver.name) {
-      // Return truck number with driver name underneath
-      return {
-        text: `${truckDriver}\n${driver.name}`,
-        height: 24, // Increased height for two lines
-      }
-    }
-  }
-
-  // Return just the driver name for non-truck entries
-  return {
-    text: truckDriver,
-    height: 15, // Standard height
-  }
+// Define ScheduleData type
+interface ScheduleData {
+  scheduleEntries?: ScheduleEntry[]
+  byTruckType?: Record<string, ScheduleEntry[]>
+  allEntries?: ScheduleEntry[]
 }
+
+// Define TruckType type
+type TruckType = "Trailer" | "Dump Truck" | "Slinger" | "Asphalt" | "Standard Mixer" | "Conveyor" | string
 
 // Helper function to convert time to 24-hour format
 function convertTo24HourFormat(timeStr: string): string {
@@ -78,42 +54,6 @@ function convertTo24HourFormat(timeStr: string): string {
     console.error("Error converting time format:", e)
     return timeStr
   }
-}
-
-// Helper function to get print truck type color
-function getPrintTruckTypeColor(type: string): string {
-  const colorMap: Record<string, string> = {
-    Trailer: "#d1fae5", // green-100
-    "Dump Truck": "#ffedd5", // orange-100
-    Slinger: "#fef9c3", // yellow-100
-    Asphalt: "#dbeafe", // blue-100
-    "Standard Mixer": "#dbeafe", // blue-100
-    Conveyor: "#f3e8ff", // purple-100
-  }
-
-  // Additional print colors for dynamic truck types
-  const additionalPrintColors = [
-    "#fee2e2", // red-100
-    "#fce7f3", // pink-100
-    "#e0e7ff", // indigo-100
-    "#ccfbf1", // teal-100
-    "#cffafe", // cyan-100
-    "#ecfccb", // lime-100
-    "#fef3c7", // amber-100
-    "#d1fae5", // emerald-100
-    "#f5d0fe", // fuchsia-100
-    "#ffe4e6", // rose-100
-  ]
-
-  if (colorMap[type]) {
-    return colorMap[type]
-  }
-
-  // If this is a new type, assign it a print color
-  const knownTypes = Object.keys(colorMap).length
-  const colorIndex = knownTypes % additionalPrintColors.length
-
-  return additionalPrintColors[colorIndex]
 }
 
 // Helper function to calculate start time
@@ -165,156 +105,192 @@ function calculateStartTime(loadTime: string): string {
   }
 }
 
+// Helper function to get print truck type color
+function getPrintTruckTypeColor(type: string): string {
+  const colorMap: Record<string, string> = {
+    Trailer: "#d1fae5", // green-100
+    "Dump Truck": "#ffedd5", // orange-100
+    Slinger: "#fef9c3", // yellow-100
+    Asphalt: "#dbeafe", // blue-100
+    "Standard Mixer": "#dbeafe", // blue-100
+    Conveyor: "#f3e8ff", // purple-100
+    Undefined: "#f3f4f6", // gray-100
+  }
+
+  // Additional print colors for dynamic truck types
+  const additionalPrintColors = [
+    "#fee2e2", // red-100
+    "#fce7f3", // pink-100
+    "#e0e7ff", // indigo-100
+    "#ccfbf1", // teal-100
+    "#cffafe", // cyan-100
+    "#ecfccb", // lime-100
+    "#fef3c7", // amber-100
+    "#d1fae5", // emerald-100
+    "#f5d0fe", // fuchsia-100
+    "#ffe4e6", // rose-100
+  ]
+
+  if (colorMap[type]) {
+    return colorMap[type]
+  }
+
+  // If this is a new type, assign it a print color
+  const knownTypes = Object.keys(colorMap).length
+  const colorIndex = knownTypes % additionalPrintColors.length
+
+  return additionalPrintColors[colorIndex]
+}
+
+// Export to PDF function
 export function exportToPDF(
   data: ScheduleData,
   fileName: string,
-  reportDate: Date = new Date(),
+  reportDate: Date | undefined = new Date(),
   summaryData?: {
     unassignedSummary: Record<TruckType, number>
     totalUnassigned: number
     totalOrders: number
   },
+  dispatcherNotes?: string,
+  driverSummary?: Array<{ name: string; time: string; truckNumber: string }>,
 ) {
   try {
-    // Create a PDF document directly
-    const pdf = new jsPDF({
+    console.log("Starting PDF export with report date:", reportDate)
+
+    // Log a sample of the data to verify time values
+    if (data.byTruckType) {
+      const sampleType = Object.keys(data.byTruckType)[0]
+      if (sampleType && data.byTruckType[sampleType].length > 0) {
+        const sampleEntry = data.byTruckType[sampleType][0]
+        console.log("Sample entry for PDF:", {
+          jobName: sampleEntry.jobName,
+          time: sampleEntry.time,
+          date: sampleEntry.date,
+          calculatedStartTime: calculateStartTime(sampleEntry.time || ""),
+          formattedTime: convertTo24HourFormat(sampleEntry.time || ""),
+        })
+      }
+    }
+
+    // Ensure reportDate is a valid Date object
+    let validReportDate = new Date()
+    if (reportDate instanceof Date && !isNaN(reportDate.getTime())) {
+      validReportDate = reportDate
+    }
+
+    console.log("Using report date:", validReportDate)
+
+    // Format the date for display
+    const dateText = format(validReportDate, "MMMM d, yyyy")
+    console.log("Formatted date text:", dateText)
+
+    // Create a new jsPDF instance
+    const doc = new jsPDF({
       orientation: "portrait",
       unit: "pt",
       format: "letter",
     })
 
     // Define page dimensions and margins
-    const pageWidth = pdf.internal.pageSize.getWidth()
-    const pageHeight = pdf.internal.pageSize.getHeight()
+    const pageWidth = doc.internal.pageSize.getWidth()
+    const pageHeight = doc.internal.pageSize.getHeight()
     const margin = 40 // 0.5 inch margin
-    const contentWidth = pageWidth - 2 * margin
 
     // Set initial y position
     let y = margin
 
     // Add title and date
-    pdf.setFontSize(18)
-    pdf.setFont("helvetica", "bold")
+    doc.setFontSize(18)
+    doc.setFont("helvetica", "bold")
     const title = "Spallina Materials Trucking Scheduler"
-    const titleWidth = (pdf.getStringUnitWidth(title) * 18) / pdf.internal.scaleFactor
-    pdf.text(title, (pageWidth - titleWidth) / 2, y)
-
+    const titleWidth = (doc.getStringUnitWidth(title) * 18) / doc.internal.scaleFactor
+    doc.text(title, (pageWidth - titleWidth) / 2, y)
     y += 25
 
+    // Add dispatcher notes if provided
+    if (dispatcherNotes && dispatcherNotes.trim()) {
+      y += 10
+      doc.setFontSize(12)
+      doc.setFont("helvetica", "bolditalic")
+      const notesWidth = (doc.getStringUnitWidth(dispatcherNotes) * 12) / doc.internal.scaleFactor
+      doc.text(dispatcherNotes, (pageWidth - notesWidth) / 2, y)
+      y += 20
+    }
+
     // Add date
-    pdf.setFontSize(12)
-    pdf.setFont("helvetica", "normal")
-    const dateText = format(reportDate, "MMMM d, yyyy")
-    const dateWidth = (pdf.getStringUnitWidth(dateText) * 12) / pdf.internal.scaleFactor
-    pdf.text(dateText, (pageWidth - dateWidth) / 2, y)
+    doc.setFontSize(12)
+    doc.setFont("helvetica", "normal")
+    const dateWidth = (doc.getStringUnitWidth(dateText) * 12) / doc.internal.scaleFactor
+    doc.text(dateText, (pageWidth - dateWidth) / 2, y)
 
     y += 30
 
-    // Add summary section if provided
-    if (summaryData && summaryData.totalUnassigned > 0) {
-      y += 20
-
-      // Add summary title
-      pdf.setFontSize(12)
-      pdf.setFont("helvetica", "bold")
-      pdf.text("Driver Assignment Summary", margin, y)
-
-      y += 20
-
-      // Add summary text
-      pdf.setFontSize(10)
-      pdf.setFont("helvetica", "normal")
-      pdf.text(
-        `${summaryData.totalUnassigned} out of ${summaryData.totalOrders} orders ` +
-          `(${Math.round((summaryData.totalUnassigned / summaryData.totalOrders) * 100)}%) need drivers assigned.`,
-        margin,
-        y,
-      )
-
-      y += 20
-
-      // Add details for each truck type with unassigned drivers
-      Object.entries(summaryData.unassignedSummary).forEach(([type, count]) => {
-        pdf.text(`${type}: ${count} unassigned`, margin + 10, y)
-        y += 15
-      })
-
-      y += 10
+    // Check if we have byTruckType or allEntries
+    if (!data.byTruckType && !data.allEntries) {
+      throw new Error("Invalid data structure: missing byTruckType and allEntries")
     }
 
-    // Get all truck types
-    const truckTypes = Object.keys(data.byTruckType) as TruckType[]
+    // Use the correct data structure based on what's available
+    const groupedData = data.byTruckType || {}
 
-    // Define table columns and their widths (in percentage of content width)
-    const columns = [
-      { header: "Job Name", width: 0.17 },
-      { header: "Start", width: 0.06 },
-      { header: "Load", width: 0.06 },
-      { header: "Location", width: 0.19 },
-      { header: "Driver", width: 0.12 },
-      { header: "Materials", width: 0.14 },
-      { header: "Qty", width: 0.1 },
-      { header: "Notes", width: 0.16 },
-    ]
+    // Filter out "Undefined" truck type from PDF export
+    if (groupedData["Undefined"]) {
+      console.log(`Removing ${groupedData["Undefined"].length} undefined truck type entries from PDF export`)
+      delete groupedData["Undefined"]
+    }
 
-    // Calculate actual column widths in points
-    const colWidths = columns.map((col) => col.width * contentWidth)
+    // Then continue with sorting the remaining truck types
+    // Sort truck types (Dump Truck, Slinger, Tractor Trailer, etc.)
+    const sortedTruckTypes = Object.keys(groupedData).sort((a, b) => {
+      // Put "Undefined" at the end
+      if (a === "Undefined") return 1
+      if (b === "Undefined") return -1
+      return a.localeCompare(b)
+    })
 
-    // Define row height
-    const baseRowHeight = 25
-    let dynamicRowHeight = baseRowHeight
+    // Get current timestamp for footer
+    const timestamp = format(new Date(), "MM/dd/yyyy hh:mm a")
+    console.log("Using timestamp for footer:", timestamp)
 
-    const headerRowHeight = 30
+    // Process each truck type
+    sortedTruckTypes.forEach((truckType, typeIndex) => {
+      const entries = groupedData[truckType]
+      console.log(`Processing truck type: ${truckType} with ${entries.length} entries`)
 
-    // Process each truck type - data is already sorted by shift priority and time
-    for (const type of truckTypes) {
-      const entries = data.byTruckType[type]
-      if (entries.length === 0) continue
+      // Sort entries by shift priority and then by time
+      entries.sort((a, b) => {
+        // First sort by shift priority
+        const shiftOrder = { "1st": 1, "2nd": 2, Scheduled: 3, Any: 4 }
+        const aShiftPriority = shiftOrder[a.shift as keyof typeof shiftOrder] || 5
+        const bShiftPriority = shiftOrder[b.shift as keyof typeof shiftOrder] || 5
 
-      // Check if we need a new page for this truck type
-      if (y + headerRowHeight + 40 > pageHeight - margin) {
-        pdf.addPage()
-        y = margin
+        if (aShiftPriority !== bShiftPriority) {
+          return aShiftPriority - bShiftPriority
+        }
+
+        // Then sort by time
+        return (a.time || "").localeCompare(b.time || "")
+      })
+
+      // Add section title for truck type
+      if (typeIndex > 0) {
+        y += 10 // Add space between sections
       }
 
-      // Add truck type header
-      pdf.setFillColor(
-        hexToRgb(getPrintTruckTypeColor(type)).r,
-        hexToRgb(getPrintTruckTypeColor(type)).g,
-        hexToRgb(getPrintTruckTypeColor(type)).b,
-      )
-      pdf.setDrawColor(0)
-      pdf.rect(margin, y, contentWidth, 30, "FD")
-
-      pdf.setFont("helvetica", "bold")
-      pdf.setFontSize(14)
-      pdf.setTextColor(0)
-      pdf.text(type, margin + 10, y + 20)
-
-      y += 40
-
-      // Draw table header
-      pdf.setFillColor(240, 240, 240) // Light gray for header
-      pdf.rect(margin, y, contentWidth, headerRowHeight, "FD")
-
-      pdf.setFont("helvetica", "bold")
-      pdf.setFontSize(9) // Changed from 10 to 9
-
-      let x = margin
-      for (let i = 0; i < columns.length; i++) {
-        pdf.rect(x, y, colWidths[i], headerRowHeight, "S")
-        pdf.text(columns[i].header, x + 5, y + 18)
-        x += colWidths[i]
+      // Check if we need a new page
+      if (y > 700) {
+        doc.addPage()
+        y = 20
       }
 
-      y += headerRowHeight
+      doc.setFont("helvetica", "bold")
+      doc.setFontSize(14)
+      doc.text(`${truckType} Schedule`, 14, y)
+      y += 20 // Increase space after title
 
-      // Draw table rows
-      pdf.setFont("helvetica", "normal")
-
-      for (let i = 0; i < entries.length; i++) {
-        const entry = entries[i]
-
+      // Prepare table data
+      const tableData = entries.map((entry) => {
         // Extract time from date if time is not available
         let displayTime = entry.time
         if (!displayTime && entry.date) {
@@ -325,199 +301,144 @@ export function exportToPDF(
         }
 
         // Calculate start time
-        const startTime = calculateStartTime(displayTime)
+        const startTime = calculateStartTime(displayTime || "")
 
-        // Calculate dynamic row height based on all wrapped text fields
-        const jobNameText = entry.jobName || ""
-        const locationTextValue = entry.location || ""
-        const materialsText = entry.materials || ""
-        const notesText = entry.notes || ""
+        // Ensure we're using the formatted times
+        const formattedStartTime = convertTo24HourFormat(startTime)
+        const formattedLoadTime = convertTo24HourFormat(displayTime || "")
 
-        const wrappedJobName = wrapText(jobNameText, colWidths[0] - 10, pdf)
-        const wrappedLocation = wrapText(locationTextValue, colWidths[3] - 10, pdf)
-        const wrappedMaterials = wrapText(materialsText, colWidths[5] - 10, pdf)
-        const wrappedNotes = wrapText(notesText, colWidths[7] - 10, pdf)
+        console.log(`PDF Entry: ${entry.jobName}, Start: ${formattedStartTime}, Load: ${formattedLoadTime}`)
 
-        const jobNameLines = wrappedJobName.split("\n")
-        const locationLines = wrappedLocation.split("\n")
-        const materialsLines = wrappedMaterials.split("\n")
-        const notesLines = wrappedNotes.split("\n")
+        return [
+          entry.jobName || "",
+          formattedStartTime || "",
+          formattedLoadTime || "",
+          entry.location || "",
+          entry.truckDriver || "",
+          entry.materials || "",
+          entry.pit || "",
+          entry.qty || "",
+          entry.numTrucks || "1",
+          entry.notes || "",
+        ]
+      })
 
-        const maxLines = Math.max(jobNameLines.length, locationLines.length, materialsLines.length, notesLines.length)
+      // Define table headers
+      const tableHeaders = [
+        "Job Name",
+        "Start Time",
+        "Load Time",
+        "Location",
+        "Driver",
+        "Materials",
+        "Pit Location",
+        "Quantity",
+        "# Trucks",
+        "Notes",
+      ]
 
-        dynamicRowHeight = Math.max(baseRowHeight, maxLines * 12 + 5)
+      // Use autoTable directly
+      autoTable(doc, {
+        startY: y,
+        head: [tableHeaders],
+        body: tableData,
+        theme: "grid",
+        styles: {
+          fontSize: 9,
+          cellPadding: 3,
+        },
+        headStyles: {
+          fillColor: [66, 66, 66],
+          textColor: [255, 255, 255],
+          fontStyle: "bold",
+        },
+        columnStyles: {
+          0: { cellWidth: "auto" }, // Job Name
+          1: { cellWidth: 40 }, // Start Time
+          2: { cellWidth: 40 }, // Load Time
+          3: { cellWidth: "auto" }, // Location
+          4: { cellWidth: 60 }, // Driver
+          5: { cellWidth: "auto" }, // Materials
+          6: { cellWidth: 60 }, // Pit Location
+          7: { cellWidth: 40 }, // Quantity
+          8: { cellWidth: 40 }, // # Trucks
+          9: { cellWidth: "auto" }, // Notes
+        },
+        didDrawPage: (data) => {
+          // Add page number at the bottom (not bold)
+          const pageCount = doc.getNumberOfPages()
+          doc.setFontSize(10)
+          doc.setFont("helvetica", "normal") // Ensure normal (not bold) font
+          doc.text(`Page ${data.pageNumber} of ${pageCount}`, pageWidth / 2, pageHeight - 10, { align: "center" })
 
-        // Check if we need a new page
-        if (y + dynamicRowHeight > pageHeight - margin) {
-          pdf.addPage()
-          y = margin
+          // Add timestamp at the bottom left
+          doc.text(timestamp, margin, pageHeight - 10)
+        },
+      })
 
-          // Redraw the header on the new page
-          pdf.setFillColor(240, 240, 240)
-          pdf.rect(margin, y, contentWidth, headerRowHeight, "FD")
+      // Update Y position after table
+      y = (doc as any).lastAutoTable.finalY + 20
+    })
 
-          pdf.setFont("helvetica", "bold")
-          pdf.setFontSize(9)
+    // Add driver summary if provided
+    if (driverSummary && driverSummary.length > 0) {
+      // Add a new page for the driver summary
+      doc.addPage()
+      y = margin
 
-          x = margin
-          for (let j = 0; j < columns.length; j++) {
-            pdf.rect(x, y, colWidths[j], headerRowHeight, "S")
-            pdf.text(columns[j].header, x + 5, y + 18)
-            x += colWidths[j]
-          }
-
-          y += headerRowHeight
-          pdf.setFont("helvetica", "normal")
-        }
-
-        // Set background color for alternating rows
-        if (i % 2 === 0) {
-          pdf.setFillColor(255, 255, 255) // White
-        } else {
-          pdf.setFillColor(249, 249, 249) // Light gray
-        }
-        pdf.rect(margin, y, contentWidth, dynamicRowHeight, "FD")
-
-        // Draw cell borders and content
-        x = margin
-
-        // Job Name - with text wrapping
-        pdf.rect(x, y, colWidths[0], dynamicRowHeight, "S")
-        const jobNameText2 = entry.jobName || ""
-        const wrappedJobName2 = wrapText(jobNameText2, colWidths[0] - 10, pdf)
-        const jobNameLines2 = wrappedJobName2.split("\n")
-        let jobNameY = y + 15
-        const lineHeight = 12
-        if (jobNameLines2.length > 1) {
-          jobNameY = y + (dynamicRowHeight - jobNameLines2.length * lineHeight) / 2 + lineHeight
-        }
-        for (let lineIndex = 0; lineIndex < jobNameLines2.length; lineIndex++) {
-          pdf.text(jobNameLines2[lineIndex], x + 5, jobNameY + lineIndex * lineHeight)
-        }
-        x += colWidths[0]
-
-        // Start Time
-        pdf.rect(x, y, colWidths[1], dynamicRowHeight, "S")
-        pdf.text(convertTo24HourFormat(startTime) || "", x + 5, y + 15)
-        x += colWidths[1]
-
-        // Load Time
-        pdf.rect(x, y, colWidths[2], dynamicRowHeight, "S")
-        pdf.text(convertTo24HourFormat(displayTime) || "", x + 5, y + 15)
-        x += colWidths[2]
-
-        // Location - with text wrapping
-        pdf.rect(x, y, colWidths[3], dynamicRowHeight, "S")
-        const locationTextValue2 = entry.location || ""
-        const wrappedLocation2 = wrapText(locationTextValue2, colWidths[3] - 10, pdf)
-        const locationLines2 = wrappedLocation2.split("\n")
-        let locationY = y + 15
-
-        // If we have multiple lines, adjust positioning
-        if (locationLines2.length > 1) {
-          locationY = y + (dynamicRowHeight - locationLines2.length * lineHeight) / 2 + lineHeight
-        }
-
-        // Draw each line of the wrapped text
-        for (let lineIndex = 0; lineIndex < locationLines2.length; lineIndex++) {
-          pdf.text(locationLines2[lineIndex], x + 5, locationY + lineIndex * lineHeight)
-        }
-        x += colWidths[3]
-
-        // Driver
-        pdf.rect(x, y, colWidths[4], dynamicRowHeight, "S")
-        const driverInfo = formatTruckDriverForPDF(entry.truckDriver || "", pdf)
-        pdf.setFont("helvetica", "bold")
-
-        // If it's a multi-line driver display (truck + driver name)
-        if (driverInfo.text.includes("\n")) {
-          const lines = driverInfo.text.split("\n")
-          pdf.text(lines[0], x + 5, y + 12) // Truck number
-          pdf.setFont("helvetica", "normal")
-          pdf.text(lines[1], x + 5, y + 22) // Driver name
-        } else {
-          pdf.text(truncateText(driverInfo.text, colWidths[4] - 10, pdf), x + 5, y + 15)
-        }
-
-        pdf.setFont("helvetica", "normal")
-        x += colWidths[4]
-
-        // Materials - with text wrapping
-        pdf.rect(x, y, colWidths[5], dynamicRowHeight, "S")
-        const materialsText2 = entry.materials || ""
-        const wrappedMaterials2 = wrapText(materialsText2, colWidths[5] - 10, pdf)
-        const materialsLines2 = wrappedMaterials2.split("\n")
-        let materialsY = y + 15
-        if (materialsLines2.length > 1) {
-          materialsY = y + (dynamicRowHeight - materialsLines2.length * lineHeight) / 2 + lineHeight
-        }
-        for (let lineIndex = 0; lineIndex < materialsLines2.length; lineIndex++) {
-          pdf.text(materialsLines2[lineIndex], x + 5, materialsY + lineIndex * lineHeight)
-        }
-        x += colWidths[5]
-
-        // Quantity - with text wrapping
-        pdf.rect(x, y, colWidths[6], dynamicRowHeight, "S")
-        const qtyText = entry.qty || ""
-        // Ensure we're using the full width of the column for wrapping
-        const wrappedQty = wrapText(qtyText, colWidths[6] - 10, pdf)
-        const qtyLines = wrappedQty.split("\n")
-        let qtyY = y + dynamicRowHeight / 2 // Center vertically
-
-        // If we have multiple lines, adjust positioning
-        if (qtyLines.length === 1) {
-          qtyY = y + 15
-        } else {
-          qtyY = y + (dynamicRowHeight - qtyLines.length * lineHeight) / 2 + lineHeight
-        }
-
-        // Draw each line of the wrapped text
-        for (let lineIndex = 0; lineIndex < qtyLines.length; lineIndex++) {
-          pdf.text(qtyLines[lineIndex], x + 5, qtyY + lineIndex * lineHeight)
-        }
-        x += colWidths[6]
-
-        // Notes - with text wrapping
-        pdf.rect(x, y, colWidths[7], dynamicRowHeight, "S")
-        const notesText2 = entry.notes || ""
-        const wrappedNotes2 = wrapText(notesText2, colWidths[7] - 10, pdf)
-        const notesLines2 = wrappedNotes2.split("\n")
-        let notesY = y + 15
-        if (notesLines2.length > 1) {
-          notesY = y + (dynamicRowHeight - notesLines2.length * lineHeight) / 2 + lineHeight
-        }
-        for (let lineIndex = 0; lineIndex < notesLines2.length; lineIndex++) {
-          pdf.text(notesLines2[lineIndex], x + 5, notesY + lineIndex * lineHeight)
-        }
-
-        y += dynamicRowHeight
-      }
-
-      // Add space after each truck type section
+      // Add title
+      doc.setFontSize(16)
+      doc.setFont("helvetica", "bold")
+      const summaryTitle = "Spallina Drivers Summary"
+      const summaryTitleWidth = (doc.getStringUnitWidth(summaryTitle) * 16) / doc.internal.scaleFactor
+      doc.text(summaryTitle, (pageWidth - summaryTitleWidth) / 2, y)
       y += 20
-    }
 
-    // Add page numbers and creation timestamp
-    const totalPages = pdf.internal.getNumberOfPages()
-    const creationTimestamp = format(new Date(), "MM/dd/yyyy HH:mm:ss")
+      // Define table headers
+      const headers = ["Driver Name", "Truck #", "Show-up Time"]
 
-    for (let i = 1; i <= totalPages; i++) {
-      pdf.setPage(i)
-      pdf.setFontSize(10)
-      pdf.text(`Page ${i} of ${totalPages}`, pageWidth - 80, pageHeight - 20)
+      // Prepare table data
+      const tableData = driverSummary.map((driver) => [driver.name, driver.truckNumber, driver.time])
 
-      // Add creation timestamp in small font at the bottom
-      pdf.setFontSize(8)
-      pdf.setTextColor(100, 100, 100) // Gray color
-      pdf.text(`Created: ${creationTimestamp}`, margin, pageHeight - 20)
+      // Use autoTable for the driver summary
+      autoTable(doc, {
+        startY: y,
+        head: [headers],
+        body: tableData,
+        theme: "grid",
+        styles: {
+          fontSize: 10,
+          cellPadding: 3,
+        },
+        headStyles: {
+          fillColor: [66, 66, 66],
+          textColor: [255, 255, 255],
+          fontStyle: "bold",
+        },
+        columnStyles: {
+          0: { cellWidth: "auto" }, // Driver Name
+          1: { cellWidth: "auto" }, // Truck #
+          2: { cellWidth: "auto" }, // Show-up Time
+        },
+        didDrawPage: (data) => {
+          // Add page number at the bottom
+          const pageCount = doc.getNumberOfPages()
+          doc.setFontSize(10)
+          doc.setFont("helvetica", "normal")
+          doc.text(`Page ${data.pageNumber} of ${pageCount}`, pageWidth / 2, pageHeight - 10, { align: "center" })
+
+          // Add timestamp at the bottom left
+          doc.text(timestamp, margin, pageHeight - 10)
+        },
+      })
     }
 
     // Save the PDF
-    const dateStr = format(reportDate, "yyyy-MM-dd")
-    pdf.save(`${dateStr}.Spallina.Materials.Trucking.Schedule.pdf`)
+    doc.save(`${fileName}.pdf`)
+    console.log("PDF saved successfully")
   } catch (error) {
     console.error("Error generating PDF:", error)
-    alert("There was an error generating the PDF. Please try again.")
+    throw error // Re-throw to allow caller to handle
   }
 }
 
@@ -593,11 +514,11 @@ function wrapText(text: string, maxWidth: number, pdf: jsPDF): string {
     lines.push(currentLine)
   }
 
-  // Limit to 3 lines maximum to avoid excessive height
-  if (lines.length > 3) {
-    lines = lines.slice(0, 3)
-    const lastLine = lines[2]
-    lines[2] = truncateText(lastLine, maxWidth - 15, pdf) + "..."
+  // Limit to 5 lines maximum for notes to show more content
+  if (lines.length > 5) {
+    lines = lines.slice(0, 5)
+    const lastLine = lines[4]
+    lines[4] = truncateText(lastLine, maxWidth - 15, pdf) + "..."
   }
 
   return lines.join("\n")

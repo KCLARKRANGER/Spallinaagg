@@ -8,6 +8,20 @@ interface TruckDisplayProps {
 }
 
 export function TruckDisplay({ truckNumber, className = "", showType = false }: TruckDisplayProps) {
+  // Special case for "SMI-FIRST RETURNING TRUCK"
+  if (truckNumber === "SMI-FIRST RETURNING TRUCK") {
+    return (
+      <div className={`flex flex-col ${className}`}>
+        <span className="font-medium text-amber-600">FIRST RETURNING TRUCK</span>
+        {showType && (
+          <Badge variant="outline" className="mt-1 text-xs bg-amber-50 text-amber-800 border-amber-200">
+            Any Type
+          </Badge>
+        )}
+      </div>
+    )
+  }
+
   const { truck, driver, truckType } = formatTruckWithDriver(truckNumber)
 
   // Define color mapping for truck types

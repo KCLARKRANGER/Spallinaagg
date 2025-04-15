@@ -1,18 +1,26 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { ScheduleData, ScheduleEntry, TruckType } from "@/types/schedule"
 import { exportToPDF } from "@/lib/export-utils"
-import { Printer, Edit, Save, X, FileIcon as FilePdf, Trash2, Copy, Plus } from "lucide-react"
+import { Printer, Edit, Save, X, FileIcon as FilePdf, Trash2, Copy, Plus, AlertCircle } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { format, parse, isValid } from "date-fns"
 import { TruckDisplay } from "@/components/truck-display"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
+import { TruckSelector } from "@/components/truck-selector"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { getDriverForTruck } from "@/lib/driver-data"
+import { useToast } from "@/components/ui/use-toast"
+import { useRouter } from "next/navigation"
+// Add the import for the DriverTimeEditor component at the top of the file
+import { DriverTimeEditor } from "@/components/driver-time-editor"
 
 interface ScheduleReportProps {
   data: ScheduleData
@@ -29,6 +37,7 @@ const truckTypeColors: Record<string, string> = {
   "Standard Mixer": "bg-purple-100 dark:bg-purple-900",
   Mixer: "bg-purple-100 dark:bg-purple-900", // Same as Standard Mixer
   Conveyor: "bg-teal-100 dark:bg-teal-900",
+  Undefined: "bg-gray-100 dark:bg-gray-800", // Added for undefined truck type
 }
 
 // Additional colors for dynamically discovered truck types
@@ -37,7 +46,7 @@ const additionalColors = [
   "bg-pink-100 dark:bg-pink-900",
   "bg-indigo-100 dark:bg-indigo-900",
   "bg-teal-100 dark:bg-teal-900",
-  "bg-cyan-100 dark:bg-cyan-900",
+  "bg-cyan-100 dark:bg-cyan-100",
   "bg-lime-100 dark:bg-lime-900",
   "bg-amber-100 dark:bg-amber-900",
   "bg-emerald-100 dark:bg-emerald-900",
@@ -71,13 +80,14 @@ function getPrintTruckTypeColor(type: string): string {
     "Standard Mixer": "#f3e8ff", // purple-100
     Mixer: "#f3e8ff", // Same as Standard Mixer
     Conveyor: "#ccfbf1", // teal-100
+    Undefined: "#f3f4f6", // gray-100
   }
 
   // Additional print colors for dynamic truck types
   const additionalPrintColors = [
     "#fee2e2", // red-100
     "#fce7f3", // pink-100
-    "#e0e7ff", // indigo-100
+    "#e0e7ff", // indigo-100",
     "#ccfbf1", // teal-100
     "#cffafe", // cyan-100
     "#ecfccb", // lime-100
@@ -205,16 +215,64 @@ function createBlankEntry(truckType: string): ScheduleEntry {
     qty: "",
     materials: "",
     notes: "",
+    numTrucks: "1",
   }
+}
+
+// Function to check if an entry is complete (has all required fields)
+function isEntryComplete(entry: ScheduleEntry): boolean {
+  return !!(entry.jobName?.trim() && entry.location?.trim() && entry.qty?.trim() && entry.materials?.trim())
 }
 
 // Function to extract the most common date from entries
 function extractReportDate(data: ScheduleData): Date {
+  console.log("Extracting report date from data:", data)
+
   // Default to today if we can't determine a date
   const today = new Date()
 
   if (!data || !data.allEntries || data.allEntries.length === 0) {
+    console.log("No entries found, using today's date")
     return today
+  }
+
+  // First, try to find entries with a Due Date field
+  for (const entry of data.allEntries) {
+    if (entry.date && entry.date.includes("Due Date:")) {
+      try {
+        const dateMatch = entry.date.match(/Due Date:\s*(.+)/)
+        if (dateMatch && dateMatch[1]) {
+          const parsedDate = new Date(dateMatch[1])
+          if (isValid(parsedDate)) {
+            console.log("Found valid Due Date:", parsedDate)
+            return parsedDate
+          }
+        }
+      } catch (e) {
+        // Continue to next entry
+      }
+    }
+  }
+
+  // Try to extract from the Monday.com format
+  for (const entry of data.allEntries) {
+    if (entry.date) {
+      // Try to match Monday.com format: "Monday, March 24th 2025, 7:00:00 am -04:00"
+      const mondayMatch = entry.date.match(/([A-Za-z]+),\s+([A-Za-z]+)\s+(\d+)(?:st|nd|rd|th)?\s+(\d{4})/)
+      if (mondayMatch) {
+        try {
+          const [_, dayOfWeek, month, day, year] = mondayMatch
+          const dateStr = `${month} ${day}, ${year}`
+          const parsedDate = new Date(dateStr)
+          if (isValid(parsedDate)) {
+            console.log("Found valid Monday.com date:", parsedDate)
+            return parsedDate
+          }
+        } catch (e) {
+          console.error("Error parsing Monday.com date:", e)
+        }
+      }
+    }
   }
 
   // Count occurrences of each date
@@ -222,7 +280,7 @@ function extractReportDate(data: ScheduleData): Date {
   let maxCount = 0
   let mostCommonDateStr = ""
 
-  // First, try to find the most common date
+  // Try to find the most common date
   data.allEntries.forEach((entry) => {
     if (entry.date) {
       // Normalize the date format
@@ -248,6 +306,8 @@ function extractReportDate(data: ScheduleData): Date {
     }
   })
 
+  console.log("Most common date string:", mostCommonDateStr)
+
   // If we found a common date, try to parse it
   if (mostCommonDateStr) {
     // Try different date formats
@@ -257,6 +317,7 @@ function extractReportDate(data: ScheduleData): Date {
       try {
         const parsedDate = parse(mostCommonDateStr, formatStr, new Date())
         if (isValid(parsedDate)) {
+          console.log("Successfully parsed date with format", formatStr, ":", parsedDate)
           return parsedDate
         }
       } catch (e) {
@@ -273,15 +334,28 @@ function extractReportDate(data: ScheduleData): Date {
         const dateStr = `${month} ${day} ${year}`
         const parsedDate = new Date(dateStr)
         if (isValid(parsedDate)) {
+          console.log("Successfully parsed complex date:", parsedDate)
           return parsedDate
         }
       } catch (e) {
-        // Fall back to today
+        console.error("Error parsing complex date:", e)
       }
+    }
+
+    // Try to directly parse the string as a last resort
+    try {
+      const directParsedDate = new Date(mostCommonDateStr)
+      if (isValid(directParsedDate)) {
+        console.log("Successfully parsed date directly:", directParsedDate)
+        return directParsedDate
+      }
+    } catch (e) {
+      console.error("Error directly parsing date:", e)
     }
   }
 
   // If we couldn't determine a date, use today
+  console.log("Using today's date as fallback:", today)
   return today
 }
 
@@ -310,8 +384,11 @@ function TruckTypeSection({
   onDuplicateEntry,
   onAddEntry,
 }: TruckTypeSectionProps) {
+  // Filter out incomplete entries
+  const completeEntries = entries.filter(isEntryComplete)
+
   // Skip rendering if entries are empty
-  if (entries.length === 0) return null
+  if (completeEntries.length === 0) return null
 
   // Get color for this truck type
   const headerColor = getTruckTypeColor(type)
@@ -337,13 +414,15 @@ function TruckTypeSection({
               <th className="p-2 text-left border">Location</th>
               <th className="p-2 text-left border">Driver</th>
               <th className="p-2 text-left border">Materials</th>
+              <th className="p-2 text-left border">Pit Location</th>
               <th className="p-2 text-left border">Quantity</th>
-              <th className="p-2 text-left border">Notes</th>
+              <th className="p-2 text-left border"># Trucks</th>
+              <th className="p-2 text-left border w-[20%]">Notes</th>
               {editMode && <th className="p-2 text-left border">Actions</th>}
             </tr>
           </thead>
           <tbody>
-            {entries.map((entry, index) => {
+            {completeEntries.map((entry, index) => {
               const isEditing = editingEntry?.index === index && editingEntry?.type === type
 
               // Extract time from date if time is not available
@@ -390,15 +469,24 @@ function TruckTypeSection({
                   <td className="p-2 border">{convertTo24HourFormat(displayTime)}</td>
                   <td className="p-2 border">{entry.location}</td>
                   <td className="p-2 border">
-                    {/^(SMI)?\d+[Ps]?$/i.test(entry.truckDriver) ? (
+                    {entry.truckDriver === "SMI-FIRST RETURNING TRUCK" ? (
+                      <div className="flex flex-col">
+                        <span className="font-medium text-amber-600">FIRST RETURNING TRUCK</span>
+                        <span className="text-xs text-amber-700">Any available truck</span>
+                      </div>
+                    ) : /^(SMI)?\d+[Ps]?$/i.test(entry.truckDriver) ? (
                       <TruckDisplay truckNumber={entry.truckDriver} showType={true} />
                     ) : (
                       <span className="font-medium">{entry.truckDriver}</span>
                     )}
                   </td>
                   <td className="p-2 border">{entry.materials}</td>
+                  <td className="p-2 border">{entry.pit}</td>
                   <td className="p-2 border">{entry.qty}</td>
-                  <td className="p-2 border">{entry.notes}</td>
+                  <td className="p-2 border">{entry.numTrucks || "1"}</td>
+                  <td className="p-2 border">
+                    <div className="whitespace-pre-wrap break-words max-w-full">{entry.notes}</div>
+                  </td>
                   {editMode && (
                     <td className="p-2 border">
                       <div className="flex gap-1">
@@ -498,11 +586,16 @@ function EditableRow({ entry, index, type, onCancel, onSave }: EditableRowProps)
         />
       </td>
       <td className="p-2 border">
-        <Input
-          value={editedEntry.truckDriver}
-          onChange={(e) => handleChange("truckDriver", e.target.value)}
-          className="h-8"
-        />
+        <div className="space-y-2">
+          <Input
+            value={editedEntry.truckDriver}
+            onChange={(e) => handleChange("truckDriver", e.target.value)}
+            className="h-8"
+            placeholder="Enter truck # or driver name"
+          />
+
+          <TruckSelector truckType={type} onSelectTruck={(truckId) => handleChange("truckDriver", truckId)} />
+        </div>
       </td>
       <td className="p-2 border">
         <Input
@@ -512,10 +605,25 @@ function EditableRow({ entry, index, type, onCancel, onSave }: EditableRowProps)
         />
       </td>
       <td className="p-2 border">
+        <Input value={editedEntry.pit} onChange={(e) => handleChange("pit", e.target.value)} className="h-8" />
+      </td>
+      <td className="p-2 border">
         <Input value={editedEntry.qty} onChange={(e) => handleChange("qty", e.target.value)} className="h-8" />
       </td>
       <td className="p-2 border">
-        <Input value={editedEntry.notes} onChange={(e) => handleChange("notes", e.target.value)} className="h-8" />
+        <Input
+          value={editedEntry.numTrucks || "1"}
+          onChange={(e) => handleChange("numTrucks", e.target.value)}
+          className="h-8"
+        />
+      </td>
+      <td className="p-2 border">
+        <Textarea
+          value={editedEntry.notes}
+          onChange={(e) => handleChange("notes", e.target.value)}
+          className="min-h-[60px] text-sm"
+          placeholder="Enter notes"
+        />
       </td>
       <td className="p-2 border">
         <div className="flex gap-1">
@@ -536,9 +644,20 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
   const [data, setData] = useState<ScheduleData>(initialData)
   const [editMode, setEditMode] = useState(false)
   const [editingEntry, setEditingEntry] = useState<{ index: number; type: TruckType } | null>(null)
+  const [dispatcherNotes, setDispatcherNotes] = useState<string>("")
+  const [isSaving, setIsSaving] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  const [driverSummary, setDriverSummary] = useState<Array<{ name: string; truckNumber: string; time: string }>>([])
+
+  const { toast } = useToast()
+  const router = useRouter()
 
   // Extract the report date from the data
-  const reportDate = useMemo(() => extractReportDate(data), [data])
+  const reportDate = useMemo(() => {
+    const extractedDate = extractReportDate(data)
+    console.log("Extracted report date:", extractedDate)
+    return extractedDate
+  }, [data])
 
   // Update data when initialData changes (new file upload)
   useEffect(() => {
@@ -671,20 +790,124 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
       newData.byTruckType[type] = sortedEntries
     })
 
+    // Reclassify "Undefined" truck type entries as "Dump Truck"
+    if (newData.byTruckType["Undefined"]) {
+      const undefinedEntries = newData.byTruckType["Undefined"]
+      console.log(`Found ${undefinedEntries.length} entries with undefined truck type - reclassifying as Dump Truck`)
+
+      // Create Dump Truck category if it doesn't exist
+      if (!newData.byTruckType["Dump Truck"]) {
+        newData.byTruckType["Dump Truck"] = []
+      }
+
+      // Move entries to Dump Truck category
+      undefinedEntries.forEach((entry) => {
+        entry.truckType = "Dump Truck"
+        newData.byTruckType["Dump Truck"].push(entry)
+      })
+
+      // Remove the Undefined category
+      delete newData.byTruckType["Undefined"]
+    }
+
+    // Then return the filtered data
     return newData
   }, [data])
 
-  const handlePDFExport = () => {
+  // Get incomplete entries across all truck types
+  const incompleteEntries = useMemo(() => {
+    const allIncomplete: ScheduleEntry[] = []
+
+    Object.entries(sortedData.byTruckType).forEach(([type, entries]) => {
+      const incomplete = entries.filter((entry) => !isEntryComplete(entry))
+      allIncomplete.push(...incomplete)
+    })
+
+    return allIncomplete
+  }, [sortedData])
+
+  // Generate driver summary - moved to useEffect to prevent infinite renders
+  useEffect(() => {
+    // Create a map to track the earliest time for each driver
+    const driverTimesMap: Record<string, { time: string; truckNumber: string }> = {}
+
+    // Process all entries to find drivers and their earliest times
+    Object.entries(sortedData.byTruckType).forEach(([type, entries]) => {
+      entries.filter(isEntryComplete).forEach((entry) => {
+        // Skip entries without drivers or with placeholder drivers
+        if (!entry.truckDriver || entry.truckDriver === "TBD" || entry.truckDriver === "") return
+
+        // Skip FIRST RETURNING entries
+        if (entry.truckDriver === "SMI-FIRST RETURNING TRUCK" || entry.truckDriver.includes("FIRST RETURNING")) return
+
+        // Extract driver information
+        let driverName = entry.truckDriver
+        const truckNumber = entry.truckDriver
+
+        // If it's a truck number, try to get the driver name
+        if (/^(SMI)?(\d+[Ps]?|MMH\d+)$/i.test(entry.truckDriver)) {
+          const driverInfo = getDriverForTruck(entry.truckDriver)
+          if (driverInfo && driverInfo.name) {
+            driverName = driverInfo.name
+          }
+        }
+
+        // Skip if we couldn't determine a driver name
+        if (!driverName || driverName === "TBD" || driverName === "No Driver" || driverName === "Not Assigned") return
+
+        // Extract time from date if time is not available
+        let displayTime = entry.time
+        if (!displayTime && entry.date) {
+          const dateTimeMatch = entry.date.match(/(\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?)/i)
+          if (dateTimeMatch) {
+            displayTime = dateTimeMatch[1]
+          }
+        }
+
+        // Calculate start time (15 minutes before load time)
+        const startTime = calculateStartTime(displayTime)
+
+        // Convert to 24-hour format for comparison
+        const formattedTime = convertTo24HourFormat(startTime)
+
+        // Update the driver's earliest time if this is earlier or if we don't have a time yet
+        if (!driverTimesMap[driverName] || formattedTime < driverTimesMap[driverName].time) {
+          driverTimesMap[driverName] = {
+            time: formattedTime,
+            truckNumber: truckNumber,
+          }
+        }
+      })
+    })
+
+    // Convert the map to an array for easier use in the component
+    const driverSummaryArray = Object.entries(driverTimesMap)
+      .sort(([, a], [, b]) => a.time.localeCompare(b.time))
+      .map(([name, info]) => ({ name, ...info }))
+
+    // Update the state with the generated driver summary
+    setDriverSummary(driverSummaryArray)
+  }, [sortedData])
+
+  // Update the handlePDFExport function to better handle errors
+  const handlePDFExport = useCallback(() => {
     // Format the date for the filename using the report date
     const dateStr = format(reportDate, "yyyy-MM-dd")
+    console.log("Using date for PDF filename:", dateStr)
 
     // Calculate unassigned drivers for each truck type
     const unassignedSummary: Record<TruckType, number> = {}
     let totalUnassigned = 0
     let totalOrders = 0
 
+    // Create a filtered version of the data with only complete entries
+    const filteredData = { ...sortedData }
+    Object.keys(filteredData.byTruckType).forEach((type) => {
+      filteredData.byTruckType[type] = filteredData.byTruckType[type].filter(isEntryComplete)
+    })
+
     // Process each truck type
-    Object.entries(sortedData.byTruckType).forEach(([type, entries]) => {
+    Object.entries(filteredData.byTruckType).forEach(([type, entries]) => {
       const unassignedCount = entries.filter(
         (entry) => !entry.truckDriver || entry.truckDriver === "TBD" || entry.truckDriver === "",
       ).length
@@ -705,32 +928,93 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
         '<svg class="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Creating PDF...'
       button.disabled = true
 
-      // Export the PDF with the report date and unassigned summary
-      exportToPDF(sortedData, `${dateStr}.Spallina.Materials.Trucking.Schedule`, reportDate, {
-        unassignedSummary,
-        totalUnassigned,
-        totalOrders,
-      })
+      try {
+        // Ensure reportDate is a valid Date object before passing it
+        const validReportDate = reportDate instanceof Date && !isNaN(reportDate.getTime()) ? reportDate : new Date()
+        console.log("Using valid report date for PDF:", validReportDate)
 
-      // Reset button after a delay
-      setTimeout(() => {
-        button.innerHTML = originalContent
-        button.disabled = false
-      }, 3000)
+        // Verify that filteredData has the expected structure
+        if (!filteredData || !filteredData.byTruckType) {
+          throw new Error("Invalid data structure: missing byTruckType")
+        }
+
+        // First, ensure all time values are properly formatted in the data
+        const pdfData = JSON.parse(JSON.stringify(filteredData)) // Deep clone to avoid modifying the original
+        Object.keys(pdfData.byTruckType).forEach((type) => {
+          pdfData.byTruckType[type].forEach((entry: any) => {
+            // Extract time from date if time is not available
+            if (!entry.time && entry.date) {
+              const dateTimeMatch = entry.date.match(/(\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?)/i)
+              if (dateTimeMatch) {
+                entry.time = dateTimeMatch[1]
+              }
+            }
+
+            // Ensure time is in a consistent format
+            if (entry.time) {
+              entry.time = convertTo24HourFormat(entry.time)
+            }
+          })
+        })
+
+        console.log("Exporting PDF with enhanced time data")
+        exportToPDF(
+          pdfData,
+          `${dateStr}.Spallina.Materials.Trucking.Schedule`,
+          validReportDate,
+          {
+            unassignedSummary,
+            totalUnassigned,
+            totalOrders,
+          },
+          dispatcherNotes,
+          driverSummary,
+        )
+      } catch (error) {
+        console.error("Error generating PDF:", error)
+        alert("There was an error generating the PDF. Please try again.")
+      } finally {
+        // Reset button after a delay
+        setTimeout(() => {
+          button.innerHTML = originalContent
+          button.disabled = false
+        }, 3000)
+      }
     } else {
-      exportToPDF(sortedData, `${dateStr}.Spallina.Materials.Trucking.Schedule`, reportDate, {
-        unassignedSummary,
-        totalUnassigned,
-        totalOrders,
-      })
+      try {
+        // Ensure reportDate is a valid Date object before passing it
+        const validReportDate = reportDate instanceof Date && !isNaN(reportDate.getTime()) ? reportDate : new Date()
+        console.log("Using valid report date for PDF (no button):", validReportDate)
+
+        // Verify that filteredData has the expected structure
+        if (!filteredData || !filteredData.byTruckType) {
+          throw new Error("Invalid data structure: missing byTruckType")
+        }
+
+        exportToPDF(
+          filteredData,
+          `${dateStr}.Spallina.Materials.Trucking.Schedule`,
+          validReportDate,
+          {
+            unassignedSummary,
+            totalUnassigned,
+            totalOrders,
+          },
+          dispatcherNotes,
+          driverSummary,
+        )
+      } catch (error) {
+        console.error("Error generating PDF:", error)
+        alert("There was an error generating the PDF. Please try again.")
+      }
     }
-  }
+  }, [reportDate, sortedData, dispatcherNotes, driverSummary])
 
   const handlePrint = () => {
     window.print()
   }
 
-  const handlePrintPreview = () => {
+  const handlePrintPreview = useCallback(() => {
     // Open a new window with just the print content
     const printWindow = window.open("", "_blank")
     if (!printWindow) return
@@ -754,7 +1038,7 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
           }
           body {
             font-family: Arial, sans-serif;
-            font-size: 12pt;
+            font-size: 10pt;
             line-height: 1.3;
             color: black;
             background: white;
@@ -766,8 +1050,9 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
             margin-bottom: 0.25in;
           }
           .print-header h1 {
-            font-size: 18pt;
+            font-size: 16pt;
             margin: 0;
+            margin-bottom: 4pt;
           }
           .print-header p {
             font-size: 12pt;
@@ -778,7 +1063,7 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
             page-break-inside: avoid;
           }
           .truck-title {
-            font-size: 16pt;
+            font-size: 14pt;
             font-weight: bold;
             margin-bottom: 0.15in;
             padding: 5pt;
@@ -788,8 +1073,9 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
           table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 10pt;
+            font-size: 9pt;
             margin-bottom: 0.25in;
+            table-layout: fixed;
           }
           thead {
             display: table-header-group; /* This makes headers repeat on each page */
@@ -801,6 +1087,9 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
             padding: 4pt;
             border: 1pt solid #000;
             text-align: left;
+            vertical-align: top;
+            overflow: hidden;
+            word-wrap: break-word;
           }
           th {
             background-color: #f0f0f0;
@@ -809,54 +1098,90 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
           tr:nth-child(even) {
             background-color: #f9f9f9;
           }
+          .page-footer {
+            position: fixed;
+            bottom: 0.25in;
+            left: 0.5in;
+            right: 0.5in;
+            font-size: 8pt;
+            text-align: center;
+            border-top: 1pt solid #ddd;
+            padding-top: 0.1in;
+          }
           .page-number {
-            text-align: right;
-            font-size: 10pt;
+            float: right;
+          }
+          .timestamp {
+            float: left;
           }
           .page-break {
             page-break-before: always;
           }
-          @page {
-            @bottom-right {
-              content: "Page " counter(page) " of " counter(pages);
-            }
+          
+          /* Column widths */
+          .col-job-name { width: 15%; }
+          .col-start-time { width: 5%; }
+          .col-load-time { width: 5%; }
+          .col-location { width: 18%; }
+          .col-driver { width: 10%; }
+          .col-materials { width: 15%; }
+          .col-pit { width: 8%; }
+          .col-qty { width: 6%; }
+          .col-trucks { width: 6%; }
+          .col-notes { width: 12%; }
+          
+          /* Driver summary table */
+          .driver-summary {
+            margin-top: 0.5in;
+            page-break-before: always;
           }
+          .driver-summary h2 {
+            font-size: 14pt;
+            margin-bottom: 0.15in;
+          }
+          .driver-summary table {
+            width: 100%;
+          }
+          .driver-summary th {
+            background-color: #f0f0f0;
+          }
+          .col-driver-name { width: 40%; }
+          .col-truck-num { width: 25%; }
+          .col-show-time { width: 35%; }
         </style>
       </head>
       <body>
         <div class="print-header">
-          <h1>Aggregate & Concrete Schedule</h1>
+          <h1>Spallina Materials Trucking Scheduler</h1>
           <p>${formattedDate}</p>
+          ${dispatcherNotes.trim() ? `<p style="font-weight: bold; font-style: italic; margin-top: 6pt;">${dispatcherNotes}</p>` : ""}
         </div>
-    `)
-
-    // Add all truck types in a single consolidated report
-    printWindow.document.write(`
-      <div>
     `)
 
     // Add each truck type section
     truckTypes.forEach((type, typeIndex) => {
-      const entries = sortedData.byTruckType[type]
+      const entries = sortedData.byTruckType[type].filter(isEntryComplete)
       if (entries.length === 0) return
 
-      // Add a page break class for large sections (except the first one)
-      const pageBreakClass = typeIndex > 0 && entries.length > 10 ? 'class="page-break"' : ""
+      // Add a page break class for new truck types (except the first one)
+      const pageBreakClass = typeIndex > 0 ? 'class="page-break"' : ""
 
       printWindow.document.write(`
         <div ${pageBreakClass} class="truck-section">
-          <div class="truck-title" style="background-color: ${getPrintTruckTypeColor(type)}">${type}</div>
+          <div class="truck-title" style="background-color: ${getPrintTruckTypeColor(type)}">${type} Schedule</div>
           <table>
             <thead>
               <tr>
-                <th>Task Name</th>
-                <th>Start Time</th>
-                <th>Load Time</th>
-                <th>Location</th>
-                <th>Driver</th>
-                <th>Materials</th>
-                <th>Quantity</th>
-                <th>Notes</th>
+                <th class="col-job-name">Job Name</th>
+                <th class="col-start-time">Start<br>Time</th>
+                <th class="col-load-time">Load<br>Time</th>
+                <th class="col-location">Location</th>
+                <th class="col-driver">Driver</th>
+                <th class="col-materials">Materials</th>
+                <th class="col-pit">Pit<br>Location</th>
+                <th class="col-qty">Quantity</th>
+                <th class="col-trucks"># Trucks</th>
+                <th class="col-notes">Notes</th>
               </tr>
             </thead>
             <tbody>
@@ -878,14 +1203,16 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
 
         printWindow.document.write(`
           <tr>
-            <td>${entry.jobName}</td>
-            <td>${convertTo24HourFormat(startTime)}</td>
-            <td>${convertTo24HourFormat(displayTime)}</td>
-            <td>${entry.location}</td>
-            <td><strong>${entry.truckDriver}</strong></td>
-            <td>${entry.materials}</td>
-            <td>${entry.qty}</td>
-            <td>${entry.notes}</td>
+            <td class="col-job-name">${entry.jobName}</td>
+            <td class="col-start-time">${convertTo24HourFormat(startTime)}</td>
+            <td class="col-load-time">${convertTo24HourFormat(displayTime)}</td>
+            <td class="col-location">${entry.location}</td>
+            <td class="col-driver">${entry.truckDriver}</td>
+            <td class="col-materials">${entry.materials}</td>
+            <td class="col-pit">${entry.pit}</td>
+            <td class="col-qty">${entry.qty}</td>
+            <td class="col-trucks">${entry.numTrucks || "1"}</td>
+            <td class="col-notes">${entry.notes}</td>
           </tr>
         `)
       })
@@ -893,12 +1220,67 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
       printWindow.document.write(`
             </tbody>
           </table>
+          <div class="page-footer">
+            <span class="timestamp">${format(new Date(), "MM/dd/yyyy hh:mm a")}</span>
+            <span class="page-number">Page <span class="page-num"></span> of <span class="page-count"></span></span>
+          </div>
         </div>
       `)
     })
 
+    // Add driver summary section
     printWindow.document.write(`
-      </div>
+  <div class="driver-summary">
+    <h2>Spallina Drivers Summary</h2>
+    <table>
+      <thead>
+        <tr>
+          <th class="col-driver-name">Driver Name</th>
+          <th class="col-truck-num">Truck #</th>
+          <th class="col-show-time">Show-up Time</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${driverSummary
+          .map(
+            (driver) => `
+          <tr>
+            <td class="col-driver-name">${driver.name}</td>
+            <td class="col-truck-num">${driver.truckNumber}</td>
+            <td class="col-show-time">${driver.time}</td>
+          </tr>
+        `,
+          )
+          .join("")}
+      </tbody>
+    </table>
+    <div class="page-footer">
+      <span class="timestamp">${format(new Date(), "MM/dd/yyyy hh:mm a")}</span>
+      <span class="page-number">Page <span class="page-num"></span> of <span class="page-count"></span></span>
+    </div>
+  </div>
+`)
+
+    printWindow.document.write(`
+      <script>
+        // Add page numbers after printing is prepared
+        window.onload = function() {
+          // Count the total number of pages
+          const pageCount = Math.ceil(document.body.scrollHeight / 1056); // Approximate for letter size
+          
+          // Set the page count in all footers
+          const pageCountElements = document.querySelectorAll('.page-count');
+          pageCountElements.forEach(el => {
+            el.textContent = pageCount.toString();
+          });
+          
+          // Set individual page numbers
+          const pageNumElements = document.querySelectorAll('.page-num');
+          pageNumElements.forEach((el, index) => {
+            el.textContent = (index + 1).toString();
+          });
+        };
+      </script>
       </body>
       </html>
     `)
@@ -908,9 +1290,11 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
     // Wait for content to load then print
     printWindow.onload = () => {
       printWindow.focus()
-      printWindow.print()
+      setTimeout(() => {
+        printWindow.print()
+      }, 1000) // Small delay to ensure styles are applied
     }
-  }
+  }, [reportDate, sortedData, dispatcherNotes, driverSummary])
 
   const toggleEditMode = () => {
     setEditMode(!editMode)
@@ -1000,20 +1384,93 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
 
     newData.byTruckType[type].push(newEntry)
 
-    // Add the new entry to allEntries
+    // Add to allEntries as well
     newData.allEntries.push(newEntry)
 
     setData(newData)
-
-    // Start editing the new entry
-    const newIndex = newData.byTruckType[type].length - 1
-    setEditingEntry({ index: newIndex, type })
   }
 
   const truckTypes = Object.keys(sortedData.byTruckType) as TruckType[]
 
   // Format the report date for display
   const formattedReportDate = format(reportDate, "MMMM d, yyyy")
+
+  // Add this function to handle driver time updates
+  const handleDriverTimeChange = useCallback(
+    (driverName: string, truckNumber: string, newTime: string) => {
+      // Create a deep copy of the data
+      const newData = JSON.parse(JSON.stringify(data)) as ScheduleData
+
+      // Find all entries with this truck number
+      let earliestEntry: ScheduleEntry | null = null
+      let earliestEntryType = ""
+      let earliestEntryIndex = -1
+      let earliestTime = "23:59"
+
+      // Find the earliest entry for this truck
+      Object.entries(newData.byTruckType).forEach(([type, entries]) => {
+        entries.forEach((entry, index) => {
+          if (entry.truckDriver === truckNumber) {
+            // Extract time from date if time is not available
+            let displayTime = entry.time
+            if (!displayTime && entry.date) {
+              const dateTimeMatch = entry.date.match(/(\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?)/i)
+              if (dateTimeMatch) {
+                displayTime = dateTimeMatch[1]
+              }
+            }
+
+            // Convert to 24-hour format for comparison
+            const formattedTime = convertTo24HourFormat(displayTime || "")
+
+            if (formattedTime < earliestTime) {
+              earliestTime = formattedTime
+              earliestEntry = entry
+              earliestEntryType = type
+              earliestEntryIndex = index
+            }
+          }
+        })
+      })
+
+      // If we found the earliest entry, update its time
+      if (earliestEntry && earliestEntryType) {
+        // Calculate a new load time (15 minutes after the selected start time)
+        const [hours, minutes] = newTime.split(":").map(Number)
+        let newLoadHours = hours
+        let newLoadMinutes = minutes + 15
+
+        if (newLoadMinutes >= 60) {
+          newLoadMinutes -= 60
+          newLoadHours = (newLoadHours + 1) % 24
+        }
+
+        const newLoadTime = `${newLoadHours.toString().padStart(2, "0")}:${newLoadMinutes.toString().padStart(2, "0")}`
+
+        // Update the entry's time
+        newData.byTruckType[earliestEntryType][earliestEntryIndex].time = newLoadTime
+
+        // Also update in allEntries
+        const allEntriesIndex = newData.allEntries.findIndex(
+          (entry) => entry.jobName === earliestEntry?.jobName && entry.truckDriver === truckNumber,
+        )
+
+        if (allEntriesIndex !== -1) {
+          newData.allEntries[allEntriesIndex].time = newLoadTime
+        }
+
+        // Update the state
+        setData(newData)
+
+        // Show a toast notification
+        toast({
+          title: "Time updated",
+          description: `Updated show-up time for ${driverName} (${truckNumber}) to ${newTime}`,
+        })
+      }
+    },
+    [data, toast],
+  )
 
   return (
     <Card className="print:shadow-none" id="schedule-report">
@@ -1033,6 +1490,21 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
             Create PDF
           </Button>
         </div>
+        {/* Dispatcher Notes Input (only in edit mode) */}
+        {editMode && (
+          <div className="mb-6 border p-4 rounded-md">
+            <Label htmlFor="dispatcher-notes" className="mb-2 block font-medium">
+              Dispatcher Notes (will appear at top of report if not empty)
+            </Label>
+            <Textarea
+              id="dispatcher-notes"
+              value={dispatcherNotes}
+              onChange={(e) => setDispatcherNotes(e.target.value)}
+              placeholder="Enter important notes for dispatchers here..."
+              className="min-h-[80px]"
+            />
+          </div>
+        )}
       </CardHeader>
       <CardContent>
         {/* Print header - only visible when printing */}
@@ -1041,10 +1513,59 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
           <p>{formattedReportDate}</p>
         </div>
 
-        {/* Report date display - visible in UI */}
+        {/* Report date and dispatcher notes */}
         <div className="mb-4 text-center">
           <h2 className="text-xl font-semibold">Schedule for {formattedReportDate}</h2>
+
+          {/* Dispatcher Notes */}
+          {dispatcherNotes.trim() && (
+            <div className="mt-4 mb-6 mx-auto max-w-3xl">
+              <p className="text-center font-bold italic text-lg">{dispatcherNotes}</p>
+            </div>
+          )}
         </div>
+
+        {/* Incomplete entries warning */}
+        {incompleteEntries.length > 0 && (
+          <Alert className="mb-6 bg-amber-50 border-amber-200">
+            <AlertCircle className="h-4 w-4 text-amber-600" />
+            <AlertTitle className="text-amber-800">Incomplete Entries ({incompleteEntries.length})</AlertTitle>
+            <AlertDescription className="text-amber-700">
+              <p className="mb-2">
+                The following entries are missing required information (Task Name, Location, Quantity, or Materials) and
+                will not be displayed in the report:
+              </p>
+              <div className="max-h-40 overflow-y-auto border border-amber-200 rounded-md p-2 bg-white">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-amber-200">
+                      <th className="p-1 text-left">Task Name</th>
+                      <th className="p-1 text-left">Truck Type</th>
+                      <th className="p-1 text-left">Missing Fields</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {incompleteEntries.map((entry, idx) => {
+                      const missingFields = []
+                      if (!entry.jobName?.trim()) missingFields.push("Task Name")
+                      if (!entry.location?.trim()) missingFields.push("Location")
+                      if (!entry.qty?.trim()) missingFields.push("Quantity")
+                      if (!entry.materials?.trim()) missingFields.push("Materials")
+
+                      return (
+                        <tr key={idx} className="border-b border-amber-100">
+                          <td className="p-1">{entry.jobName || "(Missing)"}</td>
+                          <td className="p-1">{entry.truckType}</td>
+                          <td className="p-1">{missingFields.join(", ")}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </AlertDescription>
+          </Alert>
+        )}
 
         <Tabs defaultValue="all" value={activeTab} onValueChange={setActiveTab} className="print:hidden">
           <TabsList className="mb-4">
@@ -1094,22 +1615,63 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
 
         {/* Print view - always shows all content */}
         <div className="hidden print:block space-y-8">
-          {truckTypes.map((type) => (
-            <div key={type} className="print-truck-section">
-              <TruckTypeSection
-                type={type}
-                entries={sortedData.byTruckType[type]}
-                editMode={false}
-                editingEntry={null}
-                onStartEditing={() => {}}
-                onCancelEditing={() => {}}
-                onUpdateEntry={() => {}}
-                onDeleteEntry={() => {}}
-                onDuplicateEntry={() => {}}
-                onAddEntry={() => {}}
-              />
-            </div>
-          ))}
+          {truckTypes.map((type) => {
+            const completeEntries = sortedData.byTruckType[type].filter(isEntryComplete)
+            if (completeEntries.length === 0) return null
+
+            return (
+              <div key={type} className="print-truck-section">
+                <TruckTypeSection
+                  type={type}
+                  entries={completeEntries}
+                  editMode={false}
+                  editingEntry={null}
+                  onStartEditing={() => {}}
+                  onCancelEditing={() => {}}
+                  onUpdateEntry={() => {}}
+                  onDeleteEntry={() => {}}
+                  onDuplicateEntry={() => {}}
+                  onAddEntry={() => {}}
+                />
+              </div>
+            )
+          })}
+        </div>
+        {/* Driver Summary Section */}
+
+        <div className="mt-12 pt-6 border-t">
+          <h3 className="text-xl font-bold mb-4">
+            First Scheduled Load: Schedule liable to change. Any changes will be made by direct contact from the
+            Scheduling Manager.
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="bg-muted">
+                  <th className="p-2 text-left border">Driver Name</th>
+                  <th className="p-2 text-left border">Truck #</th>
+                  <th className="p-2 text-left border">Show-up Time</th>
+                </tr>
+              </thead>
+              <tbody>
+                {driverSummary.map((driver, index) => (
+                  <tr key={index} className={index % 2 === 0 ? "bg-background" : "bg-muted/30"}>
+                    <td className="p-2 border font-medium">{driver.name}</td>
+                    <td className="p-2 border">{driver.truckNumber}</td>
+                    <td className="p-2 border">
+                      <DriverTimeEditor
+                        driverName={driver.name}
+                        truckNumber={driver.truckNumber}
+                        initialTime={driver.time}
+                        onTimeChange={handleDriverTimeChange}
+                        editMode={editMode}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </CardContent>
     </Card>

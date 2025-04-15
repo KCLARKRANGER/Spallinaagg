@@ -10,6 +10,8 @@ import { calculateStartTime } from "@/lib/time-utils"
 import { getDriverNames, getDriverForTruck, getAvailableTruckTypes } from "@/lib/driver-data"
 import { DriverSelector } from "@/components/driver-selector"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+// Import the TruckSelector component
+import { TruckSelector } from "@/components/truck-selector"
 
 interface EditableRowProps {
   entry: ScheduleEntry
@@ -82,6 +84,8 @@ export function EditableRow({ entry, index, type, onCancel, onSave }: EditableRo
             className="h-8"
             placeholder="Enter truck # or driver name"
           />
+
+          <TruckSelector truckType={type} onSelectTruck={(truckId) => handleChange("truckDriver", truckId)} />
 
           <div className="flex gap-2">
             <Dialog open={driverDialogOpen} onOpenChange={setDriverDialogOpen}>

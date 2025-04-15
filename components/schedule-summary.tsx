@@ -28,6 +28,10 @@ export function ScheduleSummary({ data }: ScheduleSummaryProps) {
     totalOrders += entries.length
   })
 
+  // Check for undefined truck types and add a warning
+  const undefinedEntries = data.byTruckType["Undefined"] || []
+  const hasUndefinedTruckTypes = undefinedEntries.length > 0
+
   // If there are no unassigned drivers, show a success message
   if (totalUnassigned === 0) {
     return (
@@ -68,6 +72,17 @@ export function ScheduleSummary({ data }: ScheduleSummaryProps) {
             drivers assigned.
           </AlertDescription>
         </Alert>
+
+        {hasUndefinedTruckTypes && (
+          <Alert className="mt-4 bg-blue-50 border-blue-200">
+            <AlertCircle className="h-4 w-4 text-blue-600" />
+            <AlertTitle className="text-blue-800">Auto-assigned Truck Types</AlertTitle>
+            <AlertDescription className="text-blue-700">
+              {undefinedEntries.length} {undefinedEntries.length === 1 ? "entry" : "entries"} had undefined truck types
+              and were automatically assigned to "Dump Truck" type.
+            </AlertDescription>
+          </Alert>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {Object.entries(unassignedSummary).map(([type, count]) => (

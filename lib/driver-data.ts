@@ -7,7 +7,10 @@ export interface DriverEntry {
   priority?: number // 0: Everyday, 1: Primary, 2: Substitute, 3: Contractor
 }
 
+// Add Tim Hampshire as the driver for MMH06
 export const DRIVER_DATA: DriverEntry[] = [
+  { id: "MMH02", name: "Conner Weaver", status: "active", truckType: "Trailer", priority: 0 },
+  { id: "MMH06", name: "Tim Hampshire", status: "active", truckType: "Triaxle", priority: 0 },
   { id: "33", name: "", status: "active", truckType: "6 wheeler", priority: 1 },
   { id: "36", name: "Dennis Hagner", status: "active", truckType: "Triaxle", priority: 0 },
   { id: "38", name: "James McGreggor", status: "active", truckType: "Triaxle", priority: 0 },
@@ -15,10 +18,13 @@ export const DRIVER_DATA: DriverEntry[] = [
   { id: "41", name: "Dave Tanascoli", status: "active", truckType: "Triaxle", priority: 1 },
   { id: "42", name: "Not Assigned", status: "active", truckType: "Triaxle", priority: 2 },
   { id: "43", name: "Dale LoveJoy", status: "active", truckType: "Triaxle", priority: 0 },
+  { id: "SMI43P", name: "Dale Lovejoy", status: "active", truckType: "Trailer", priority: 0 },
   { id: "46", name: "No Driver", status: "active", truckType: "6 Wheeler", priority: 2 },
   { id: "48", name: "Bob Frost", status: "active", truckType: "Triaxle", priority: 0 },
+  { id: "SMI48P", name: "Bob Frost", status: "active", truckType: "Trailer", priority: 0 },
   { id: "49", name: "John Miller", status: "active", truckType: "Triaxle", priority: 1 },
   { id: "50", name: "Ron Smith", status: "active", truckType: "Triaxle", priority: 0 },
+  { id: "SMI50P", name: "Ron Smith", status: "active", truckType: "Trailer", priority: 0 },
   { id: "67", name: "Brittney W", status: "active", truckType: "Conveyor", priority: 0 },
   { id: "68", name: "Karl Hubbard", status: "active", truckType: "Conveyor", priority: 1 },
   { id: "69", name: "", status: "active", truckType: "Mixer", priority: 2 },
@@ -29,12 +35,12 @@ export const DRIVER_DATA: DriverEntry[] = [
   { id: "78", name: "Ken Parnell", status: "active", truckType: "Mixer", priority: 0 },
   { id: "85", name: "Mixer Driver", status: "active", truckType: "Mixer", priority: 1 },
   { id: "88", name: "Mixer Driver", status: "active", truckType: "Mixer", priority: 1 },
-  { id: "94", name: "Robert Clark", status: "active", truckType: "Dump Truck", priority: 0 },
-  { id: "95", name: "Kelly Shoup", status: "active", truckType: "Dump Truck", priority: 0 },
-  { id: "96", name: "Eric Morrell", status: "active", truckType: "Dump Truck", priority: 0 },
   { id: "92s", name: "", status: "active", truckType: "Slinger", priority: 1 },
+  { id: "94", name: "Robert Clark", status: "active", truckType: "Dump Truck", priority: 0 },
   { id: "94s", name: "Robert Clark", status: "active", truckType: "Slinger", priority: 0 },
+  { id: "95", name: "Kelly Shoup", status: "active", truckType: "Dump Truck", priority: 0 },
   { id: "95s", name: "Kelly Shoup", status: "active", truckType: "Slinger", priority: 0 },
+  { id: "96", name: "Eric Morrell", status: "active", truckType: "Dump Truck", priority: 0 },
   { id: "96s", name: "Eric Morrell", status: "active", truckType: "Slinger", priority: 0 },
   { id: "106", name: "Dan Rice", status: "active", truckType: "Trailer", priority: 0 },
   { id: "107", name: "Mark Slauson", status: "active", truckType: "Trailer", priority: 1 },
@@ -42,11 +48,7 @@ export const DRIVER_DATA: DriverEntry[] = [
   { id: "110", name: "Tom Marks", status: "active", truckType: "Trailer", priority: 1 },
   { id: "111", name: "Tom Stoffer", status: "active", truckType: "Trailer", priority: 0 },
   { id: "112", name: "Bob Semmell", status: "active", truckType: "Trailer", priority: 1 },
-  { id: "MMH2", name: "Conner Weaver", status: "active", truckType: "Triaxle", priority: 3 },
-  { id: "SMI43P", name: "Dale Lovejoy", status: "active", truckType: "Trailer", priority: 0 },
-  { id: "SMI48P", name: "Bob Frost", status: "active", truckType: "Trailer", priority: 0 },
-  { id: "SMI50P", name: "Ron Smith", status: "active", truckType: "Trailer", priority: 0 },
-  { id: "MMH06", name: "Tim Hampshire", status: "active", truckType: "Triaxle", priority: 0 },
+  { id: "FIRST-RETURNING", name: "SMI-FIRST RETURNING TRUCK", status: "active", priority: 2 },
 ]
 
 // Add function to get all available truck types
@@ -73,7 +75,8 @@ export function getAvailableDrivers(): DriverEntry[] {
 
 // Get drivers by truck type
 export function getDriversByTruckType(truckType: string): DriverEntry[] {
-  return DRIVER_DATA.filter(
+  // First get regular drivers for this truck type
+  const regularDrivers = DRIVER_DATA.filter(
     (driver) =>
       driver.truckType === truckType &&
       driver.status === "active" &&
@@ -81,6 +84,12 @@ export function getDriversByTruckType(truckType: string): DriverEntry[] {
       driver.name !== "No Driver" &&
       driver.name !== "Not Assigned",
   )
+
+  // Add the special "FIRST RETURNING TRUCK" option if it exists
+  const firstReturningDriver = DRIVER_DATA.find((driver) => driver.id === "FIRST-RETURNING")
+
+  // Return the combined list
+  return firstReturningDriver ? [...regularDrivers, firstReturningDriver] : regularDrivers
 }
 
 // Get all driver names for dropdown selection
@@ -129,6 +138,11 @@ export function parseTruckNumber(truckNumber: string): { baseNumber: string | nu
 
 // Get driver for a truck number
 export function getDriverForTruck(truckNumber: string): DriverEntry | null {
+  // Handle MMH prefix (e.g., "MMH02" -> "MMH02")
+  if (truckNumber.toUpperCase().startsWith("MMH")) {
+    return DRIVER_DATA.find((driver) => driver.id.toUpperCase() === truckNumber.toUpperCase()) || null
+  }
+
   const { baseNumber, isSlinger } = parseTruckNumber(truckNumber)
   if (!baseNumber) return null
 
@@ -183,4 +197,28 @@ export function getPriorityLabel(priority: number | undefined): string {
     default:
       return "Unspecified"
   }
+}
+
+// Load driver data from localStorage if available
+export function loadSavedDriverData(): DriverEntry[] {
+  if (typeof window !== "undefined") {
+    try {
+      const savedData = window.localStorage.getItem("permanent-driver-data")
+      if (savedData) {
+        const parsedData = JSON.parse(savedData)
+        // Validate that we have an array of driver entries
+        if (
+          Array.isArray(parsedData) &&
+          parsedData.length > 0 &&
+          parsedData[0] &&
+          typeof parsedData[0].id === "string"
+        ) {
+          return parsedData
+        }
+      }
+    } catch (error) {
+      console.error("Error loading saved driver data:", error)
+    }
+  }
+  return DRIVER_DATA
 }

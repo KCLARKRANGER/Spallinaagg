@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -18,14 +18,38 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { useLocalStorage } from "@/hooks/use-local-storage"
 import { DRIVER_DATA, type DriverEntry, getPriorityLabel } from "@/lib/driver-data"
 import { Truck, Plus, Edit, Save, Trash2, AlertCircle, CheckCircle, Filter } from "lucide-react"
-import { ExportConfiguration } from "@/components/export-configuration"
+import { getContractorTruckById, getSortedContractorTrucks } from "@/lib/contractor-data"
 
 export function TruckManagement() {
-  // Use localStorage to persist driver data
-  const [drivers, setDrivers] = useLocalStorage<DriverEntry[]>("driver-data", DRIVER_DATA)
+  // Use a ref to track initialization
+  const initialized = useRef(false)
+
+  // Load driver data from localStorage or use default
+  const [drivers, setDrivers] = useState<DriverEntry[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const savedData = window.localStorage.getItem("driver-data")
+        if (savedData) {
+          return JSON.parse(savedData)
+        }
+      } catch (error) {
+        console.error("Error loading driver data:", error)
+      }
+    }
+    return DRIVER_DATA
+  })
+
+  // Save drivers to localStorage whenever they change
+  useEffect(() => {
+    if (initialized.current) {
+      window.localStorage.setItem("driver-data", JSON.stringify(drivers))
+    } else {
+      initialized.current = true
+    }
+  }, [drivers])
+
   const [filteredDrivers, setFilteredDrivers] = useState<DriverEntry[]>(drivers)
 
   // State for editing and adding drivers
@@ -133,7 +157,7 @@ export function TruckManagement() {
     }
 
     // Update the driver
-    const updatedDrivers = drivers.map((driver) => (driver === originalDriver ? editingDriver : driver))
+    const updatedDrivers = drivers.map((driver) => (driver.id === originalDriver?.id ? editingDriver : driver))
 
     setDrivers(updatedDrivers)
     setIsEditDialogOpen(false)
@@ -286,7 +310,41 @@ export function TruckManagement() {
       {/* Export Configuration Button */}
       <Card>
         <CardContent className="pt-6">
-          <ExportConfiguration />
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button
+              onClick={() => {
+                // Save to permanent storage
+                window.localStorage.setItem("permanent-driver-data", JSON.stringify(drivers))
+                // Show success message (could be implemented with a toast)
+                alert("Configuration saved successfully!")
+              }}
+              className="flex-1"
+            >
+              <Save className="h-4 w-4 mr-2" />
+              Save Configuration
+            </Button>
+
+            <Button
+              onClick={() => {
+                // Export as JSON file
+                const data = JSON.stringify(drivers, null, 2)
+                const blob = new Blob([data], { type: "application/json" })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement("a")
+                a.href = url
+                a.download = "driver-configuration.json"
+                document.body.appendChild(a)
+                a.click()
+                document.body.removeChild(a)
+                URL.revokeObjectURL(url)
+              }}
+              variant="outline"
+              className="flex-1"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Export Configuration
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -535,6 +593,57 @@ export function TruckManagement() {
                 </Select>
               </div>
             </div>
+            {editingDriver?.priority === 3 && (
+              <div className="col-span-4 mt-4">
+                <Label htmlFor="contractor-truck-select" className="mb-2 block">
+                  Select Contractor Truck
+                </Label>
+                <Select
+                  value={editingDriver?.id || ""}
+                  onValueChange={(value) => {
+                    if (value === "add-new") {
+                      // Handle "Add New +" option - just keep the current values
+                      return
+                    }
+
+                    // Get the contractor truck details
+                    const contractorTruck = getContractorTruckById(value)
+                    if (contractorTruck) {
+                      setEditingDriver((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              id: contractorTruck.id,
+                              name: contractorTruck.company || "",
+                              truckType: "Contractor",
+                            }
+                          : null,
+                      )
+                    }
+                  }}
+                >
+                  <SelectTrigger id="contractor-truck-select" className="w-full">
+                    <SelectValue placeholder="Select a contractor truck" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">-- Select a Contractor Truck --</SelectItem>
+                    {getSortedContractorTrucks().map((truck) => (
+                      <SelectItem key={truck.id} value={truck.id} className="py-2">
+                        <div>
+                          <div>{truck.id}</div>
+                          {truck.tonnage && (
+                            <div className="text-xs text-muted-foreground mt-0.5">{truck.tonnage} ton</div>
+                          )}
+                        </div>
+                      </SelectItem>
+                    ))}
+                    <SelectItem value="add-new" className="font-semibold text-primary">
+                      Add New +
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="edit-status" className="text-right">
@@ -665,6 +774,53 @@ export function TruckManagement() {
                 </Select>
               </div>
             </div>
+            {newDriver.priority === 3 && (
+              <div className="col-span-4 mt-4">
+                <Label htmlFor="new-contractor-truck-select" className="mb-2 block">
+                  Select Contractor Truck
+                </Label>
+                <Select
+                  value={newDriver.id || ""}
+                  onValueChange={(value) => {
+                    if (value === "add-new") {
+                      // Handle "Add New +" option - just keep the current values
+                      return
+                    }
+
+                    // Get the contractor truck details
+                    const contractorTruck = getContractorTruckById(value)
+                    if (contractorTruck) {
+                      setNewDriver({
+                        ...newDriver,
+                        id: contractorTruck.id,
+                        name: contractorTruck.company || "",
+                        truckType: "Contractor",
+                      })
+                    }
+                  }}
+                >
+                  <SelectTrigger id="new-contractor-truck-select" className="w-full">
+                    <SelectValue placeholder="Select a contractor truck" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">-- Select a Contractor Truck --</SelectItem>
+                    {getSortedContractorTrucks().map((truck) => (
+                      <SelectItem key={truck.id} value={truck.id} className="py-2">
+                        <div>
+                          <div>{truck.id}</div>
+                          {truck.tonnage && (
+                            <div className="text-xs text-muted-foreground mt-0.5">{truck.tonnage} ton</div>
+                          )}
+                        </div>
+                      </SelectItem>
+                    ))}
+                    <SelectItem value="add-new" className="font-semibold text-primary">
+                      Add New +
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="new-status" className="text-right">

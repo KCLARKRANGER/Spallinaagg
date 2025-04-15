@@ -9,10 +9,9 @@ import { AvailableTrucks } from "@/components/available-trucks"
 import { ScheduleHeader } from "@/components/schedule-header"
 import { ScheduleFilters } from "@/components/schedule-filters"
 import type { ScheduleData } from "@/types/schedule"
-import { useLocalStorage } from "@/hooks/use-local-storage"
 
 export default function Home() {
-  const [scheduleData, setScheduleData] = useLocalStorage<ScheduleData | null>("scheduleData", null)
+  const [scheduleData, setScheduleData] = useState<ScheduleData | null>(null)
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined)
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedTruckType, setSelectedTruckType] = useState("all")
@@ -73,19 +72,27 @@ export default function Home() {
               searchTerm={searchTerm}
               onSearchChange={setSearchTerm}
               onClearFilters={handleClearFilters}
-              truckTypes={Object.keys(scheduleData.byTruckType)}
+              truckTypes={scheduleData ? Object.keys(scheduleData.byTruckType) : []}
               selectedTruckType={selectedTruckType}
               onTruckTypeChange={setSelectedTruckType}
             />
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2">
-                <AvailableTrucks scheduleData={scheduleData} onAssignTruck={handleAssignTruck} />
-                <ScheduleReport data={scheduleData} />
+                {scheduleData && (
+                  <>
+                    <AvailableTrucks scheduleData={scheduleData} onAssignTruck={handleAssignTruck} />
+                    <ScheduleReport data={scheduleData} />
+                  </>
+                )}
               </div>
               <div className="space-y-6">
-                <ScheduleSummary data={scheduleData} />
-                <DriverAssignmentHelper scheduleData={scheduleData} onAssignDrivers={handleAssignDrivers} />
+                {scheduleData && (
+                  <>
+                    <ScheduleSummary data={scheduleData} />
+                    <DriverAssignmentHelper scheduleData={scheduleData} onAssignDrivers={handleAssignDrivers} />
+                  </>
+                )}
               </div>
             </div>
           </>
