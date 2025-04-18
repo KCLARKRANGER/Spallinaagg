@@ -16,7 +16,7 @@ export const DRIVER_DATA: DriverEntry[] = [
   { id: "38", name: "James McGreggor", status: "active", truckType: "Triaxle", priority: 0 },
   { id: "40", name: "Tom West", status: "active", truckType: "Triaxle", priority: 1 },
   { id: "41", name: "Dave Tanascoli", status: "active", truckType: "Triaxle", priority: 1 },
-  { id: "42", name: "Not Assigned", status: "active", truckType: "Triaxle", priority: 2 },
+  { id: "42", name: "John Miller", status: "active", truckType: "Triaxle", priority: 0 },
   { id: "43", name: "Dale LoveJoy", status: "active", truckType: "Triaxle", priority: 0 },
   { id: "SMI43P", name: "Dale Lovejoy", status: "active", truckType: "Trailer", priority: 0 },
   { id: "46", name: "No Driver", status: "active", truckType: "6 Wheeler", priority: 2 },
