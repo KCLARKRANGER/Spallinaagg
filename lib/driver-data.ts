@@ -22,7 +22,7 @@ export const DRIVER_DATA: DriverEntry[] = [
   { id: "46", name: "No Driver", status: "active", truckType: "6 Wheeler", priority: 2 },
   { id: "48", name: "Bob Frost", status: "active", truckType: "Triaxle", priority: 0 },
   { id: "SMI48P", name: "Bob Frost", status: "active", truckType: "Trailer", priority: 0 },
-  { id: "49", name: "John Miller", status: "active", truckType: "Triaxle", priority: 1 },
+  { id: "49", name: "Ross Ciufo", status: "active", truckType: "Triaxle", priority: 1 },
   { id: "50", name: "Ron Smith", status: "active", truckType: "Triaxle", priority: 0 },
   { id: "SMI50P", name: "Ron Smith", status: "active", truckType: "Trailer", priority: 0 },
   { id: "67", name: "Brittney W", status: "active", truckType: "Conveyor", priority: 0 },
