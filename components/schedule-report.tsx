@@ -544,6 +544,14 @@ function EditableRow({ entry, index, type, onCancel, onSave }: EditableRowProps)
     }))
   }
 
+  // Also update the handleChange function in EditableRow to recalculate startTime when time changes
+  // Add this function after the existing handleChange function:
+
+  const handleTimeChange = (value: string) => {
+    handleChange("time", value)
+    // No need to recalculate startTime here as it's now directly editable
+  }
+
   return (
     <tr className="bg-primary/5">
       <td className="p-2 border">
@@ -573,10 +581,38 @@ function EditableRow({ entry, index, type, onCancel, onSave }: EditableRowProps)
         </div>
       </td>
       <td className="p-2 border">
-        <div className="text-sm text-muted-foreground">{startTime}</div>
+        <Input
+          value={startTime}
+          onChange={(e) => {
+            // When start time changes, update load time to be 15 minutes later
+            const startValue = e.target.value
+            if (startValue && /^\d{1,2}:\d{2}$/.test(startValue)) {
+              const [hours, minutes] = startValue.split(":").map(Number)
+              let newLoadHours = hours
+              let newLoadMinutes = minutes + 15
+
+              if (newLoadMinutes >= 60) {
+                newLoadMinutes -= 60
+                newLoadHours = (newLoadHours + 1) % 24
+              }
+
+              const newLoadTime = `${newLoadHours.toString().padStart(2, "0")}:${newLoadMinutes
+                .toString()
+                .padStart(2, "0")}`
+              handleChange("time", newLoadTime)
+            }
+          }}
+          className="h-8"
+          placeholder="HH:MM"
+        />
       </td>
       <td className="p-2 border">
-        <Input value={editedEntry.time} onChange={(e) => handleChange("time", e.target.value)} className="h-8" />
+        <Input
+          value={editedEntry.time}
+          onChange={(e) => handleTimeChange(e.target.value)}
+          className="h-8"
+          placeholder="HH:MM"
+        />
       </td>
       <td className="p-2 border">
         <Input

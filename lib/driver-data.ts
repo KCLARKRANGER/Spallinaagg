@@ -48,6 +48,16 @@ export const DRIVER_DATA: DriverEntry[] = [
   { id: "110", name: "Tom Marks", status: "active", truckType: "Trailer", priority: 1 },
   { id: "111", name: "Tom Stoffer", status: "active", truckType: "Trailer", priority: 0 },
   { id: "112", name: "Bob Semmell", status: "active", truckType: "Trailer", priority: 1 },
+  { id: "CONTRACTOR1", name: "CONTRACTOR1", status: "active", truckType: "Contractor", priority: 3 },
+  { id: "CONTRACTOR2", name: "CONTRACTOR2", status: "active", truckType: "Contractor", priority: 3 },
+  { id: "CONTRACTOR3", name: "CONTRACTOR3", status: "active", truckType: "Contractor", priority: 3 },
+  { id: "CONTRACTOR4", name: "CONTRACTOR4", status: "active", truckType: "Contractor", priority: 3 },
+  { id: "CONTRACTOR5", name: "CONTRACTOR5", status: "active", truckType: "Contractor", priority: 3 },
+  { id: "CONTRACTOR6", name: "CONTRACTOR6", status: "active", truckType: "Contractor", priority: 3 },
+  { id: "CONTRACTOR7", name: "CONTRACTOR7", status: "active", truckType: "Contractor", priority: 3 },
+  { id: "CONTRACTOR8", name: "CONTRACTOR8", status: "active", truckType: "Contractor", priority: 3 },
+  { id: "CONTRACTOR9", name: "CONTRACTOR9", status: "active", truckType: "Contractor", priority: 3 },
+  { id: "CONTRACTOR10", name: "CONTRACTOR10", status: "active", truckType: "Contractor", priority: 3 },
   { id: "FIRST-RETURNING", name: "SMI-FIRST RETURNING TRUCK", status: "active", priority: 2 },
 ]
 
