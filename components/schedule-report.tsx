@@ -21,6 +21,7 @@ import { useToast } from "@/components/ui/use-toast"
 import { useRouter } from "next/navigation"
 // Add the import for the DriverTimeEditor component at the top of the file
 import { DriverTimeEditor } from "@/components/driver-time-editor"
+import { TimeAdjuster } from "@/components/time-adjuster"
 
 interface ScheduleReportProps {
   data: ScheduleData
@@ -416,6 +417,33 @@ function TruckTypeSection({
   // Skip rendering if entries are empty
   if (completeEntries.length === 0) return null
 
+  // Debug logging for entries of this truck type
+  console.log(`TruckTypeSection: ${type} with ${completeEntries.length} entries`)
+  completeEntries.forEach((entry, idx) => {
+    console.log(
+      `Entry ${idx}: Job=${entry.jobName}, Time=${entry.time}, ShowUpTime=${entry.showUpTime}, Interval=${entry.interval}`,
+    )
+  })
+
+  // Group entries by job name to verify if staggering is working
+  const entriesByJob: Record<string, ScheduleEntry[]> = {}
+  completeEntries.forEach((entry) => {
+    if (!entriesByJob[entry.jobName]) {
+      entriesByJob[entry.jobName] = []
+    }
+    entriesByJob[entry.jobName].push(entry)
+  })
+
+  // Log job groups to check if times are staggered
+  Object.entries(entriesByJob).forEach(([jobName, jobEntries]) => {
+    if (jobEntries.length > 1) {
+      console.log(`Job ${jobName} has ${jobEntries.length} entries:`)
+      jobEntries.forEach((entry, idx) => {
+        console.log(`  Entry ${idx}: Time=${entry.time}, ShowUpTime=${entry.showUpTime}`)
+      })
+    }
+  })
+
   // Get color for this truck type
   const headerColor = getTruckTypeColor(type)
 
@@ -656,11 +684,12 @@ function EditableRow({ entry, index, type, onCancel, onSave }: EditableRowProps)
       </td>
       <td className="p-2 border">
         <div className="space-y-2">
-          <Input
+          <TimeAdjuster
             value={editedEntry.showUpTime || ""}
-            onChange={(e) => handleShowUpTimeChange(e.target.value)}
+            onChange={handleShowUpTimeChange}
             className="h-8"
             placeholder="HH:MM"
+            step={5}
           />
           <div className="flex items-center gap-2">
             <Label htmlFor="showUpOffset" className="text-xs whitespace-nowrap">
@@ -682,11 +711,12 @@ function EditableRow({ entry, index, type, onCancel, onSave }: EditableRowProps)
         </div>
       </td>
       <td className="p-2 border">
-        <Input
-          value={editedEntry.time}
-          onChange={(e) => handleLoadTimeChange(e.target.value)}
+        <TimeAdjuster
+          value={editedEntry.time || ""}
+          onChange={handleLoadTimeChange}
           className="h-8"
           placeholder="HH:MM"
+          step={5}
         />
       </td>
       <td className="p-2 border">

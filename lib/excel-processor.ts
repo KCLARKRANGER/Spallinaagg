@@ -2,7 +2,7 @@ import * as XLSX from "xlsx"
 import type { ScheduleData, ScheduleEntry, TruckType } from "@/types/schedule"
 import { parseCSV } from "./csv-parser"
 import { assignMissingPitLocations } from "./pit-location-mapper"
-import { addMinutesToTimeString, convertTo24HourFormat } from "./time-utils"
+import { addMinutesToTimeString, convertTo24HourFormat, parseTimeFromDateString } from "./time-utils"
 
 export async function processExcelFile(file: File): Promise<ScheduleData> {
   try {
@@ -47,122 +47,40 @@ export function processScheduleData(data: any[]): ScheduleData {
   const allEntries: ScheduleEntry[] = []
   const byTruckType: Record<TruckType, ScheduleEntry[]> = {}
 
-  // Process each row
-  data.forEach((row, index) => {
-    console.log(`Processing row ${index}:`, row)
-
-    // Map column names to our expected format based on the provided schema
+  // Group rows by job name to process related entries together
+  const jobGroups: Record<string, any[]> = {}
+  data.forEach((row) => {
     const jobName = row["Task Name"] || ""
-    const truckType = (row["Truck Type (drop down)"] || "").toString().trim()
+    if (!jobGroups[jobName]) {
+      jobGroups[jobName] = []
+    }
+    jobGroups[jobName].push(row)
+  })
 
-    // Check for both "Pit Location (labels)" and "Pit Location (drop down)"
-    const pit = (row["Pit Location (labels)"] || row["Pit Location (drop down)"] || "")
+  console.log(`Found ${Object.keys(jobGroups).length} unique job names`)
+
+  // Process each job group
+  Object.entries(jobGroups).forEach(([jobName, jobRows]) => {
+    console.log(`\nProcessing job: ${jobName} with ${jobRows.length} rows`)
+
+    // Get common data from the first row
+    const firstRow = jobRows[0]
+
+    // Get truck type (default to "Dump Truck" if not specified)
+    const truckType = (firstRow["Truck Type (drop down)"] || "").toString().trim() || "Dump Truck"
+    console.log(`Truck type: ${truckType}`)
+
+    // Get pit location
+    const pit = (firstRow["Pit Location (labels)"] || firstRow["Pit Location (drop down)"] || "")
       .toString()
       .replace(/^\[|\]$/g, "")
-      .trim() // Remove brackets if present
+      .trim()
 
-    const shift = (row["1st/2nd (labels)"] || "").toString()
-    const driversAssigned = (row["Drivers Assigned (labels)"] || "").toString()
-
-    console.log(`Row ${index} - Job: ${jobName}, Truck: ${truckType}, Drivers: ${driversAssigned}`)
-
-    // With this code that assigns "Dump Truck" as the default truck type:
-    const finalTruckType = truckType || "Dump Truck"
-    if (!truckType) {
-      console.warn(`Warning: Row ${index} (${jobName}) has undefined truck type - assigning default "Dump Truck"`)
-    }
-    console.log(`Row ${index} - Using truck type: ${finalTruckType}`)
-
-    // Parse the due date
-    let date = ""
-    let time = ""
-
-    if (row["Due Date"]) {
-      try {
-        // Handle the specific Monday.com date format
-        // Example: "Monday, March 10th 2025, 7:00:00 am -04:00"
-        const dateString = row["Due Date"]
-        const parsedDate = new Date(dateString)
-
-        if (!isNaN(parsedDate.getTime())) {
-          date = parsedDate.toLocaleDateString("en-US", {
-            month: "2-digit",
-            day: "2-digit",
-            year: "numeric",
-          })
-
-          // Extract time from the date string if no specific time is provided
-          if (!row["Time (short text)"]) {
-            const timeMatch = dateString.match(/(\d{1,2}):(\d{2}):(\d{2})\s*(am|pm)/i)
-            if (timeMatch) {
-              const [_, hours, minutes, seconds, ampm] = timeMatch
-              let hoursNum = Number.parseInt(hours)
-              if (ampm.toLowerCase() === "pm" && hoursNum < 12) hoursNum += 12
-              if (ampm.toLowerCase() === "am" && hoursNum === 12) hoursNum = 0
-              time = `${hoursNum.toString().padStart(2, "0")}:${minutes}`
-            }
-          }
-        } else {
-          date = dateString
-        }
-      } catch (e) {
-        console.error("Error parsing date:", e)
-        date = row["Due Date"]
-      }
-    }
-
-    // Use the time field if available, otherwise keep the extracted time from date
-    if (row["Time (short text)"]) {
-      time = row["Time (short text)"].toString()
-    }
-
-    // Find the line where location is extracted and update it to use column I
-    const location = (
-      row["LOCATION (short text)"] ||
-      row["I"] ||
-      row["LOCATION (location)"] ||
-      row["Location"] ||
-      ""
-    ).toString()
-    const qty = (row["QTY REQ'D (short text)"] || "").toString()
-
-    // Check for all possible material column names
-    const materials = (
-      row["Material Type (short text)"] ||
-      row["Material Type (drop down)"] ||
-      row["AGG. Materials (drop down)"] ||
-      ""
-    ).toString()
-
-    // Log the materials value for debugging
-    console.log(`Row ${index} - Materials: ${materials}`)
-
-    const notes = (row["Additional Delivery Notes (text)"] || "").toString()
-
-    // Parse drivers assigned
-    let driversList: string[] = []
-
-    if (driversAssigned) {
-      // First, clean up the string - remove brackets
-      const cleanDrivers = driversAssigned.replace(/^\[|\]$/g, "").trim()
-
-      if (cleanDrivers) {
-        // Split by commas and trim each entry
-        driversList = cleanDrivers
-          .split(/\s*,\s*/)
-          .map((d) => d.trim())
-          .filter((d) => d)
-        console.log(`Row ${index} - Parsed drivers:`, driversList)
-      }
-    }
-
-    // Normalize shift value
+    // Get shift information and normalize it
+    const shift = (firstRow["1st/2nd (labels)"] || "").toString()
     let normalizedShift = shift
     if (shift) {
-      // Convert to lowercase for case-insensitive comparison
       const lowerShift = shift.toLowerCase()
-
-      // Check for common patterns and normalize
       if (lowerShift.includes("1st") || lowerShift === "1" || lowerShift === "first") {
         normalizedShift = "1st"
       } else if (lowerShift.includes("2nd") || lowerShift === "2" || lowerShift === "second") {
@@ -174,19 +92,85 @@ export function processScheduleData(data: any[]): ScheduleData {
       }
     }
 
-    // Get the number of trucks required (from column L)
+    // Get location, quantity, materials, and notes
+    const location = (
+      firstRow["LOCATION (short text)"] ||
+      firstRow["I"] ||
+      firstRow["LOCATION (location)"] ||
+      firstRow["Location"] ||
+      ""
+    ).toString()
+
+    const qty = (firstRow["QTY REQ'D (short text)"] || "").toString()
+
+    const materials = (
+      firstRow["Material Type (short text)"] ||
+      firstRow["Material Type (drop down)"] ||
+      firstRow["AGG. Materials (drop down)"] ||
+      ""
+    ).toString()
+
+    const notes = (firstRow["Additional Delivery Notes (text)"] || "").toString()
+
+    // Parse the due date and extract time
+    let date = ""
+    let baseTime = ""
+
+    if (firstRow["Due Date"]) {
+      try {
+        const dateString = firstRow["Due Date"]
+        console.log(`Due Date string: ${dateString}`)
+
+        // Extract date part
+        const dateMatch = dateString.match(/([A-Za-z]+),\s+([A-Za-z]+)\s+(\d+)(?:st|nd|rd|th)?\s+(\d{4})/)
+        if (dateMatch) {
+          const [_, dayOfWeek, month, day, year] = dateMatch
+          date = `${month} ${day}, ${year}`
+        } else {
+          // Try standard date format
+          const parsedDate = new Date(dateString)
+          if (!isNaN(parsedDate.getTime())) {
+            date = parsedDate.toLocaleDateString("en-US", {
+              month: "2-digit",
+              day: "2-digit",
+              year: "numeric",
+            })
+          } else {
+            date = dateString
+          }
+        }
+
+        // Extract time part - use our utility function
+        baseTime = parseTimeFromDateString(dateString)
+        console.log(`Extracted base time: ${baseTime}`)
+      } catch (e) {
+        console.error("Error parsing date:", e)
+        date = firstRow["Due Date"]
+      }
+    }
+
+    // Use the time field if available, otherwise keep the extracted time
+    if (firstRow["Time (short text)"]) {
+      baseTime = firstRow["Time (short text)"].toString()
+      console.log(`Using Time (short text): ${baseTime}`)
+    }
+
+    // Convert base time to 24-hour format for calculations
+    const formattedBaseTime = convertTo24HourFormat(baseTime)
+    console.log(`Formatted base time: ${formattedBaseTime}`)
+
+    // Get the number of trucks required
     const numTrucksStr = (
-      row["Number of Trucks (number)"] ||
-      row["L"] ||
-      row["Number of Trucks"] ||
-      row["# of Trucks"] ||
+      firstRow["Number of Trucks (number)"] ||
+      firstRow["L"] ||
+      firstRow["Number of Trucks"] ||
+      firstRow["# of Trucks"] ||
       "1"
     ).toString()
-    let numTrucks = 1
 
+    let numTrucks = 1
     try {
-      // Parse the number of trucks, default to 1 if not a valid number
-      numTrucks = Number.parseInt(numTrucksStr)
+      numTrucks = Number.parseInt(numTrucksStr, 10)
       if (isNaN(numTrucks) || numTrucks < 1) {
         numTrucks = 1
       }
@@ -194,82 +178,82 @@ export function processScheduleData(data: any[]): ScheduleData {
       console.warn("Could not parse number of trucks:", numTrucksStr)
       numTrucks = 1
     }
+    console.log(`Number of trucks: ${numTrucks}`)
 
-    console.log(`Row ${index} - Number of trucks required: ${numTrucks} (from column L: ${numTrucksStr})`)
-
-    // Get the interval between trucks (from column M)
+    // Get the interval between trucks
     const intervalStr = (
-      row["Interval Between Trucks (minutes)"] ||
-      row["Interval Between Trucks (number)"] ||
-      row["M"] ||
+      firstRow["Interval Between Trucks (minutes)"] ||
+      firstRow["Interval Between Trucks (number)"] ||
+      firstRow["M"] ||
       "0"
     ).toString()
-    let interval = 0
 
+    let interval = 0
     try {
-      interval = Number.parseInt(intervalStr)
+      interval = Number.parseInt(intervalStr, 10)
       if (isNaN(interval)) interval = 0
     } catch (e) {
       console.warn("Could not parse interval between trucks:", intervalStr)
       interval = 0
     }
+    console.log(`Interval between trucks: ${interval} minutes`)
 
-    console.log(`Row ${index} - Interval between trucks: ${interval} minutes (from column M: ${intervalStr})`)
-
-    // Get the show-up time offset (from column N)
-    // If no value is provided, use the standard 15-minute offset
+    // Get the show-up time offset
     const showUpOffsetStr = (
-      row["Show-up Time Offset (minutes)"] ||
-      row["Minutes Before Shift (SHOWUPTIME) (number)"] ||
-      row["N"] ||
+      firstRow["Show-up Time Offset (minutes)"] ||
+      firstRow["Minutes Before Shift (SHOWUPTIME) (number)"] ||
+      firstRow["N"] ||
       ""
     ).toString()
 
-    let showUpOffset = 15 // Default to 15 minutes if not specified
-
+    let showUpOffset = 15 // Default to 15 minutes
     if (showUpOffsetStr.trim() !== "") {
       try {
-        showUpOffset = Number.parseInt(showUpOffsetStr)
+        showUpOffset = Number.parseInt(showUpOffsetStr, 10)
         if (isNaN(showUpOffset)) showUpOffset = 15
       } catch (e) {
         console.warn("Could not parse show-up time offset:", showUpOffsetStr)
         showUpOffset = 15
       }
     }
+    console.log(`Show-up time offset: ${showUpOffset} minutes`)
 
-    console.log(`Row ${index} - Show-up time offset: ${showUpOffset} minutes`)
+    // Get assigned drivers
+    const driversAssigned = (firstRow["Drivers Assigned (labels)"] || "").toString()
+    let driversList: string[] = []
 
-    // Convert time to 24-hour format for consistency
-    const formattedTime = convertTo24HourFormat(time)
-
-    // Calculate show-up time based on load time and offset
-    let showUpTime = ""
-    if (formattedTime) {
-      showUpTime = addMinutesToTimeString(formattedTime, -showUpOffset)
-      console.log(
-        `Row ${index} - Calculated show-up time: ${showUpTime} (${showUpOffset} minutes before ${formattedTime})`,
-      )
+    if (driversAssigned) {
+      const cleanDrivers = driversAssigned.replace(/^\[|\]$/g, "").trim()
+      if (cleanDrivers) {
+        driversList = cleanDrivers
+          .split(/\s*,\s*/)
+          .map((d) => d.trim())
+          .filter((d) => d)
+        console.log(`Assigned drivers: ${driversList.join(", ")}`)
+      }
     }
 
-    // UPDATED LOGIC: Handle both cases for duplicating entries
-    // Apply staggering for ALL truck types, including Asphalt
+    // Set a default time if we couldn't extract one
+    if (!formattedBaseTime) {
+      console.log("No time found, using default time of 08:00")
+      baseTime = "08:00"
+    }
 
-    // Case 1: If we have specific drivers assigned, create an entry for each driver
+    // CASE 1: If we have specific drivers assigned, create an entry for each driver
     if (driversList.length > 0 && driversList[0] !== "TBD") {
       console.log(`Creating ${driversList.length} entries based on assigned drivers`)
 
-      // Create an entry for each driver with staggered start times
       driversList.forEach((driver, driverIndex) => {
         // Calculate staggered time based on interval
-        let staggeredTime = formattedTime
+        let staggeredTime = formattedBaseTime
         if (interval > 0 && driverIndex > 0) {
-          staggeredTime = addMinutesToTimeString(formattedTime, interval * driverIndex)
+          staggeredTime = addMinutesToTimeString(formattedBaseTime, -interval * driverIndex)
           console.log(
-            `Driver ${driver} (index ${driverIndex}): Staggered load time = ${staggeredTime} (${interval * driverIndex} minutes after first driver)`,
+            `Driver ${driver} (index ${driverIndex}): Staggered time = ${staggeredTime} (${interval * driverIndex} minutes before base time)`,
           )
         }
 
-        // Calculate show-up time based on offset and the staggered load time
+        // Calculate show-up time based on the staggered time
         let driverShowUpTime = ""
         if (staggeredTime) {
           driverShowUpTime = addMinutesToTimeString(staggeredTime, -showUpOffset)
@@ -280,49 +264,47 @@ export function processScheduleData(data: any[]): ScheduleData {
 
         const entry: ScheduleEntry = {
           jobName,
-          truckType: finalTruckType,
+          truckType,
           pit,
           shift: normalizedShift,
           truckDriver: driver,
           date,
           time: staggeredTime,
-          showUpTime: driverShowUpTime, // Add the show-up time
+          showUpTime: driverShowUpTime,
           location,
           qty,
           materials,
           notes,
           numTrucks: numTrucksStr,
-          interval: interval.toString(), // Store the interval
-          showUpOffset: showUpOffset.toString(), // Store the show-up offset
+          interval: interval.toString(),
+          showUpOffset: showUpOffset.toString(),
         }
 
         allEntries.push(entry)
 
-        // Add to truck type grouping
-        if (!byTruckType[finalTruckType]) {
-          byTruckType[finalTruckType] = []
+        if (!byTruckType[truckType]) {
+          byTruckType[truckType] = []
         }
-
-        byTruckType[finalTruckType].push(entry)
+        byTruckType[truckType].push(entry)
       })
     }
-    // Case 2: If we have a specific number of trucks required, create that many entries
+    // CASE 2: If we have multiple trucks required but no specific drivers
     else if (numTrucks > 1) {
-      console.log(`Creating ${numTrucks} entries based on Number of Trucks column (${numTrucksStr})`)
-      console.log(`Using interval of ${interval} minutes between trucks`)
+      console.log(`Creating ${numTrucks} entries based on number of trucks with staggered times`)
 
-      // Create entries based on numTrucks with staggered start times
       for (let i = 0; i < numTrucks; i++) {
-        // Calculate staggered time based on interval
-        let staggeredTime = formattedTime
-        if (interval > 0 && i > 0) {
-          staggeredTime = addMinutesToTimeString(formattedTime, interval * i)
+        // Calculate staggered time by SUBTRACTING (i * interval) from the base time
+        let staggeredTime = formattedBaseTime
+        if (interval > 0) {
+          // For truck index 0, use the base time
+          // For subsequent trucks, subtract (index * interval) minutes from base time
+          staggeredTime = i === 0 ? formattedBaseTime : addMinutesToTimeString(formattedBaseTime, -interval * i)
           console.log(
-            `Truck ${i + 1}: Staggered load time = ${staggeredTime} (${interval * i} minutes after first truck)`,
+            `Truck ${i + 1}: Staggered time = ${staggeredTime} (${i > 0 ? interval * i : 0} minutes before base time)`,
           )
         }
 
-        // Calculate show-up time based on offset and the staggered load time
+        // Calculate show-up time based on the staggered time
         let truckShowUpTime = ""
         if (staggeredTime) {
           truckShowUpTime = addMinutesToTimeString(staggeredTime, -showUpOffset)
@@ -333,71 +315,65 @@ export function processScheduleData(data: any[]): ScheduleData {
 
         const entry: ScheduleEntry = {
           jobName,
-          truckType: finalTruckType,
+          truckType,
           pit,
           shift: normalizedShift,
           truckDriver: "TBD",
           date,
           time: staggeredTime,
-          showUpTime: truckShowUpTime, // Add the show-up time
+          showUpTime: truckShowUpTime,
           location,
           qty,
           materials,
           notes,
           numTrucks: numTrucksStr,
-          interval: interval.toString(), // Store the interval
-          showUpOffset: showUpOffset.toString(), // Store the show-up offset
+          interval: interval.toString(),
+          showUpOffset: showUpOffset.toString(),
         }
 
         allEntries.push(entry)
 
-        // Add to truck type grouping
-        if (!byTruckType[finalTruckType]) {
-          byTruckType[finalTruckType] = []
+        if (!byTruckType[truckType]) {
+          byTruckType[truckType] = []
         }
-
-        byTruckType[finalTruckType].push(entry)
+        byTruckType[truckType].push(entry)
       }
     }
-    // Case 3: Default case - create a single entry
+    // CASE 3: Single entry (default case)
     else {
       console.log(`Creating a single entry (default case)`)
 
       // Calculate show-up time based on offset
       let singleShowUpTime = ""
-      if (formattedTime) {
-        singleShowUpTime = addMinutesToTimeString(formattedTime, -showUpOffset)
-        console.log(
-          `Single entry: Show-up time = ${singleShowUpTime} (${showUpOffset} minutes before ${formattedTime})`,
-        )
+      if (formattedBaseTime) {
+        singleShowUpTime = addMinutesToTimeString(formattedBaseTime, -showUpOffset)
+        console.log(`Show-up time = ${singleShowUpTime} (${showUpOffset} minutes before ${formattedBaseTime})`)
       }
 
       const entry: ScheduleEntry = {
         jobName,
-        truckType: finalTruckType,
+        truckType,
         pit,
         shift: normalizedShift,
         truckDriver: "TBD",
         date,
-        time: formattedTime,
-        showUpTime: singleShowUpTime, // Add the show-up time
+        time: formattedBaseTime,
+        showUpTime: singleShowUpTime,
         location,
         qty,
         materials,
         notes,
         numTrucks: numTrucksStr,
-        interval: interval.toString(), // Store the interval
-        showUpOffset: showUpOffset.toString(), // Store the show-up offset
+        interval: interval.toString(),
+        showUpOffset: showUpOffset.toString(),
       }
 
       allEntries.push(entry)
 
-      // Add to truck type grouping
-      if (!byTruckType[finalTruckType]) {
-        byTruckType[finalTruckType] = []
+      if (!byTruckType[truckType]) {
+        byTruckType[truckType] = []
       }
-
-      byTruckType[finalTruckType].push(entry)
+      byTruckType[truckType].push(entry)
     }
   })
 

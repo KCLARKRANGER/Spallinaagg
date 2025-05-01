@@ -4,9 +4,10 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { formatTime, parseTimeString, addMinutesToTime } from "@/lib/time-utils"
+import { formatTime, parseTimeString, addMinutesToTime, addMinutesToTimeString } from "@/lib/time-utils"
 import type { ScheduleEntry } from "@/types/schedule"
 import { TimeOffsetSelector } from "./time-offset-selector"
+import { TimeAdjuster } from "./time-adjuster"
 
 interface EditableRowProps {
   entry: ScheduleEntry
@@ -30,8 +31,11 @@ export function EditableRow({ entry, onSave, onCancel }: EditableRowProps) {
         const diffMinutes = Math.round(diffMs / 60000)
         setTimeOffset(diffMinutes)
       }
+    } else if (entry.showUpOffset) {
+      // Use the show-up offset if available
+      setTimeOffset(Number(entry.showUpOffset))
     }
-  }, [entry.startTime, entry.loadTime])
+  }, [entry.startTime, entry.loadTime, entry.showUpOffset])
 
   const handleInputChange = (field: keyof ScheduleEntry, value: string) => {
     setEditedEntry((prev) => ({ ...prev, [field]: value }))
@@ -57,24 +61,39 @@ export function EditableRow({ entry, onSave, onCancel }: EditableRowProps) {
     }
   }
 
+  const handleShowUpTimeChange = (newTime: string) => {
+    setEditedEntry((prev) => ({ ...prev, showUpTime: newTime }))
+
+    // Update load time based on offset
+    if (newTime) {
+      const loadTime = addMinutesToTimeString(newTime, Number(editedEntry.showUpOffset || timeOffset))
+      setEditedEntry((prev) => ({ ...prev, time: loadTime }))
+    }
+  }
+
+  const handleLoadTimeChange = (newTime: string) => {
+    setEditedEntry((prev) => ({ ...prev, time: newTime }))
+
+    // Update show-up time based on offset
+    if (newTime) {
+      const showUpTime = addMinutesToTimeString(newTime, -Number(editedEntry.showUpOffset || timeOffset))
+      setEditedEntry((prev) => ({ ...prev, showUpTime: showUpTime }))
+    }
+  }
+
   const handleOffsetChange = (newOffsetMinutes: number) => {
     setTimeOffset(newOffsetMinutes)
+    setEditedEntry((prev) => ({ ...prev, showUpOffset: newOffsetMinutes.toString() }))
 
-    // Recalculate load time based on start time and new offset
-    if (editedEntry.startTime) {
-      const startTime = parseTimeString(editedEntry.startTime)
-      if (startTime) {
-        const newLoadTime = addMinutesToTime(startTime, newOffsetMinutes)
-        setEditedEntry((prev) => ({ ...prev, loadTime: formatTime(newLoadTime) }))
-      }
+    // Recalculate show-up time based on load time and new offset
+    if (editedEntry.time) {
+      const showUpTime = addMinutesToTimeString(editedEntry.time, -newOffsetMinutes)
+      setEditedEntry((prev) => ({ ...prev, showUpTime: showUpTime }))
     }
-    // Alternatively, recalculate start time based on load time and new offset
-    else if (editedEntry.loadTime) {
-      const loadTime = parseTimeString(editedEntry.loadTime)
-      if (loadTime) {
-        const newStartTime = addMinutesToTime(loadTime, -newOffsetMinutes)
-        setEditedEntry((prev) => ({ ...prev, startTime: formatTime(newStartTime) }))
-      }
+    // Alternatively, recalculate load time based on show-up time and new offset
+    else if (editedEntry.showUpTime) {
+      const loadTime = addMinutesToTimeString(editedEntry.showUpTime, newOffsetMinutes)
+      setEditedEntry((prev) => ({ ...prev, time: loadTime }))
     }
   }
 
@@ -88,19 +107,21 @@ export function EditableRow({ entry, onSave, onCancel }: EditableRowProps) {
         />
       </td>
       <td className="p-2">
-        <Input
-          value={editedEntry.startTime || ""}
-          onChange={(e) => handleInputChange("startTime", e.target.value)}
+        <TimeAdjuster
+          value={editedEntry.showUpTime || ""}
+          onChange={handleShowUpTimeChange}
           className="w-full"
-          placeholder="HH:MM AM/PM"
+          placeholder="HH:MM"
+          step={5}
         />
       </td>
       <td className="p-2">
-        <Input
-          value={editedEntry.loadTime || ""}
-          onChange={(e) => handleInputChange("loadTime", e.target.value)}
+        <TimeAdjuster
+          value={editedEntry.time || ""}
+          onChange={handleLoadTimeChange}
           className="w-full"
-          placeholder="HH:MM AM/PM"
+          placeholder="HH:MM"
+          step={5}
         />
       </td>
       <td className="p-2">

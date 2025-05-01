@@ -1,9 +1,9 @@
 "use client"
 
 import { useState } from "react"
-import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Check } from "lucide-react"
+import { Save, Edit, X } from "lucide-react"
+import { TimeAdjuster } from "./time-adjuster"
 
 interface DriverTimeEditorProps {
   driverName: string
@@ -21,10 +21,15 @@ export function DriverTimeEditor({
   editMode,
 }: DriverTimeEditorProps) {
   const [isEditing, setIsEditing] = useState(false)
-  const [timeValue, setTimeValue] = useState(initialTime)
+  const [time, setTime] = useState(initialTime)
 
   const handleSave = () => {
-    onTimeChange(driverName, truckNumber, timeValue)
+    onTimeChange(driverName, truckNumber, time)
+    setIsEditing(false)
+  }
+
+  const handleCancel = () => {
+    setTime(initialTime)
     setIsEditing(false)
   }
 
@@ -35,26 +40,23 @@ export function DriverTimeEditor({
   if (isEditing) {
     return (
       <div className="flex items-center gap-1">
-        <Input
-          value={timeValue}
-          onChange={(e) => setTimeValue(e.target.value)}
-          className="h-8 w-24"
-          placeholder="HH:MM"
-        />
+        <TimeAdjuster value={time} onChange={setTime} className="h-8 w-24" placeholder="HH:MM" step={5} />
         <Button variant="ghost" size="sm" onClick={handleSave} className="h-8 w-8 p-0">
-          <Check className="h-4 w-4" />
+          <Save className="h-4 w-4" />
+        </Button>
+        <Button variant="ghost" size="sm" onClick={handleCancel} className="h-8 w-8 p-0">
+          <X className="h-4 w-4" />
         </Button>
       </div>
     )
   }
 
   return (
-    <div
-      className="cursor-pointer hover:underline hover:text-primary"
-      onClick={() => setIsEditing(true)}
-      title="Click to edit"
-    >
-      {initialTime}
+    <div className="flex items-center gap-1">
+      <span>{initialTime}</span>
+      <Button variant="ghost" size="sm" onClick={() => setIsEditing(true)} className="h-8 w-8 p-0 ml-2">
+        <Edit className="h-4 w-4" />
+      </Button>
     </div>
   )
 }

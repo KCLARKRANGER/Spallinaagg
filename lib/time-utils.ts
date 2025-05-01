@@ -2,6 +2,37 @@
  * Time Utility functions
  */
 
+// New function to parse time from Monday.com date string format
+export function parseTimeFromDateString(dateString: string): string {
+  if (!dateString) return ""
+
+  try {
+    // Try to match time pattern in Monday.com format: "Thursday, May 1st 2025, 6:30:00 am -04:00"
+    const timeMatch = dateString.match(/(\d{1,2}):(\d{2}):(\d{2})\s*(am|pm)/i)
+    if (timeMatch) {
+      const [_, hours, minutes, seconds, ampm] = timeMatch
+      let hoursNum = Number.parseInt(hours, 10)
+
+      // Convert to 24-hour format
+      if (ampm.toLowerCase() === "pm" && hoursNum < 12) hoursNum += 12
+      if (ampm.toLowerCase() === "am" && hoursNum === 12) hoursNum = 0
+
+      return `${hoursNum.toString().padStart(2, "0")}:${minutes}`
+    }
+
+    // Try other common formats
+    const dateObj = new Date(dateString)
+    if (!isNaN(dateObj.getTime())) {
+      return `${dateObj.getHours().toString().padStart(2, "0")}:${dateObj.getMinutes().toString().padStart(2, "0")}`
+    }
+
+    return ""
+  } catch (e) {
+    console.error("Error parsing time from date string:", e)
+    return ""
+  }
+}
+
 // Helper function to calculate start time based on load time and offset in minutes
 export function calculateStartTime(loadTime: string, offsetMinutes = 0): string {
   if (!loadTime) return "" // Return empty string instead of "N/A"
@@ -55,6 +86,8 @@ export function calculateStartTime(loadTime: string, offsetMinutes = 0): string 
 export function addMinutesToTimeString(timeStr: string, minutesToAdd: number): string {
   if (!timeStr) return ""
 
+  console.log(`Adding ${minutesToAdd} minutes to time ${timeStr}`)
+
   try {
     // Handle direct HH:MM format for better performance
     if (/^\d{1,2}:\d{2}$/.test(timeStr)) {
@@ -79,8 +112,9 @@ export function addMinutesToTimeString(timeStr: string, minutesToAdd: number): s
       // Handle hour overflow/underflow (24-hour cycle)
       hours = ((hours % 24) + 24) % 24
 
-      // Format back to time string
-      return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
+      const result = `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
+      console.log(`Result: ${result}`)
+      return result
     }
 
     // For other formats, use the date object approach
@@ -91,7 +125,9 @@ export function addMinutesToTimeString(timeStr: string, minutesToAdd: number): s
     date.setMinutes(date.getMinutes() + minutesToAdd)
 
     // Format back to time string
-    return `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`
+    const result = `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`
+    console.log(`Result: ${result}`)
+    return result
   } catch (e) {
     console.error("Error adding minutes to time:", e)
     return timeStr
