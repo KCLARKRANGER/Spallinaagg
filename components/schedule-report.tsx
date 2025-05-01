@@ -109,8 +109,8 @@ function getPrintTruckTypeColor(type: string): string {
   return colorMap[type]
 }
 
-// Helper function to calculate start time (15 minutes before load time)
-function calculateStartTime(loadTime: string): string {
+// Helper function to calculate start time based on load time and offset in minutes
+function calculateStartTime(loadTime: string, offsetMinutes = 15): string {
   if (!loadTime) return "N/A"
 
   try {
@@ -140,9 +140,9 @@ function calculateStartTime(loadTime: string): string {
       return "N/A"
     }
 
-    // Subtract 15 minutes
-    minutes -= 15
-    if (minutes < 0) {
+    // Subtract the offset minutes
+    minutes -= offsetMinutes
+    while (minutes < 0) {
       minutes += 60
       hours -= 1
     }
@@ -154,6 +154,32 @@ function calculateStartTime(loadTime: string): string {
     return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
   } catch (e) {
     console.error("Error calculating start time:", e)
+    return "N/A"
+  }
+}
+
+// Helper function to calculate load time based on start time and offset in minutes
+function calculateLoadTime(startTime: string, offsetMinutes = 15): string {
+  if (!startTime) return "N/A"
+
+  try {
+    // Parse the start time
+    const [hoursStr, minutesStr] = startTime.split(":")
+    let hours = Number.parseInt(hoursStr, 10)
+    let minutes = Number.parseInt(minutesStr, 10)
+
+    // Add the offset minutes
+    minutes += offsetMinutes
+    while (minutes >= 60) {
+      minutes -= 60
+      hours += 1
+    }
+    hours = hours % 24
+
+    // Format the load time in 24-hour format
+    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
+  } catch (e) {
+    console.error("Error calculating load time:", e)
     return "N/A"
   }
 }
@@ -434,8 +460,8 @@ function TruckTypeSection({
                 }
               }
 
-              // Calculate start time
-              const startTime = calculateStartTime(displayTime)
+              // Calculate start time using the entry's timeOffset if available
+              const startTime = calculateStartTime(displayTime, entry.timeOffset || 15)
 
               if (isEditing) {
                 return (
@@ -531,11 +557,43 @@ interface EditableRowProps {
   onSave: (entry: ScheduleEntry, index: number, type: TruckType) => void
 }
 
+// Define time offset options
+const TIME_OFFSET_OPTIONS = [
+  { value: "10", label: "10 minutes" },
+  { value: "15", label: "15 minutes" },
+  { value: "20", label: "20 minutes" },
+  { value: "30", label: "30 minutes" },
+  { value: "45", label: "45 minutes" },
+  { value: "60", label: "1 hour" },
+  { value: "90", label: "1.5 hours" },
+  { value: "120", label: "2 hours" },
+]
+
 function EditableRow({ entry, index, type, onCancel, onSave }: EditableRowProps) {
   const [editedEntry, setEditedEntry] = useState<ScheduleEntry>({ ...entry })
+  const [startTime, setStartTime] = useState<string>(calculateStartTime(entry.time))
+  const [timeOffset, setTimeOffset] = useState<string>((entry.timeOffset || 15).toString())
 
-  // Calculate start time based on the current time value
-  const startTime = calculateStartTime(editedEntry.time)
+  // Update start time when time offset changes
+  useEffect(() => {
+    if (editedEntry.time && /^\d{1,2}:\d{2}$/.test(editedEntry.time)) {
+      const offsetMinutes = Number.parseInt(timeOffset, 10)
+      const [hours, minutes] = editedEntry.time.split(":").map(Number)
+
+      // Calculate start time by subtracting the offset
+      let newStartHours = hours
+      let newStartMinutes = minutes - offsetMinutes
+
+      // Handle minute underflow
+      while (newStartMinutes < 0) {
+        newStartMinutes += 60
+        newStartHours = (newStartHours - 1 + 24) % 24
+      }
+
+      const newStartTime = `${newStartHours.toString().padStart(2, "0")}:${newStartMinutes.toString().padStart(2, "0")}`
+      setStartTime(newStartTime)
+    }
+  }, [timeOffset, editedEntry.time])
 
   const handleChange = (field: keyof ScheduleEntry, value: string) => {
     setEditedEntry((prev) => ({
@@ -544,12 +602,79 @@ function EditableRow({ entry, index, type, onCancel, onSave }: EditableRowProps)
     }))
   }
 
-  // Also update the handleChange function in EditableRow to recalculate startTime when time changes
-  // Add this function after the existing handleChange function:
+  // Handle start time change - updates load time based on offset
+  const handleStartTimeChange = (value: string) => {
+    if (value && /^\d{1,2}:\d{2}$/.test(value)) {
+      const offsetMinutes = Number.parseInt(timeOffset, 10)
+      const [hours, minutes] = value.split(":").map(Number)
 
-  const handleTimeChange = (value: string) => {
+      // Calculate new load time by adding the offset
+      let newLoadHours = hours
+      let newLoadMinutes = minutes + offsetMinutes
+
+      // Handle minute overflow
+      while (newLoadMinutes >= 60) {
+        newLoadMinutes -= 60
+        newLoadHours = (newLoadHours + 1) % 24
+      }
+
+      const newLoadTime = `${newLoadHours.toString().padStart(2, "0")}:${newLoadMinutes.toString().padStart(2, "0")}`
+
+      setStartTime(value)
+      handleChange("time", newLoadTime)
+    } else {
+      setStartTime(value)
+    }
+  }
+
+  // Handle load time change - updates start time based on offset
+  const handleLoadTimeChange = (value: string) => {
     handleChange("time", value)
-    // No need to recalculate startTime here as it's now directly editable
+    if (value && /^\d{1,2}:\d{2}$/.test(value)) {
+      const offsetMinutes = Number.parseInt(timeOffset, 10)
+      const [hours, minutes] = value.split(":").map(Number)
+
+      // Calculate new start time by subtracting the offset
+      let newStartHours = hours
+      let newStartMinutes = minutes - offsetMinutes
+
+      // Handle minute underflow
+      while (newStartMinutes < 0) {
+        newStartMinutes += 60
+        newStartHours = (newStartHours - 1 + 24) % 24
+      }
+
+      const newStartTime = `${newStartHours.toString().padStart(2, "0")}:${newStartMinutes.toString().padStart(2, "0")}`
+      setStartTime(newStartTime)
+    }
+  }
+
+  // Handle offset change - recalculates start time based on load time
+  const handleOffsetChange = (value: string) => {
+    setTimeOffset(value)
+    // Update the editedEntry with the new timeOffset
+    setEditedEntry((prev) => ({
+      ...prev,
+      timeOffset: Number.parseInt(value, 10),
+    }))
+
+    if (editedEntry.time && /^\d{1,2}:\d{2}$/.test(editedEntry.time)) {
+      const offsetMinutes = Number.parseInt(value, 10)
+      const [hours, minutes] = editedEntry.time.split(":").map(Number)
+
+      // Calculate new start time by subtracting the offset
+      let newStartHours = hours
+      let newStartMinutes = minutes - offsetMinutes
+
+      // Handle minute underflow
+      while (newStartMinutes < 0) {
+        newStartMinutes += 60
+        newStartHours = (newStartHours - 1 + 24) % 24
+      }
+
+      const newStartTime = `${newStartHours.toString().padStart(2, "0")}:${newStartMinutes.toString().padStart(2, "0")}`
+      setStartTime(newStartTime)
+    }
   }
 
   return (
@@ -581,35 +706,36 @@ function EditableRow({ entry, index, type, onCancel, onSave }: EditableRowProps)
         </div>
       </td>
       <td className="p-2 border">
-        <Input
-          value={startTime}
-          onChange={(e) => {
-            // When start time changes, update load time to be 15 minutes later
-            const startValue = e.target.value
-            if (startValue && /^\d{1,2}:\d{2}$/.test(startValue)) {
-              const [hours, minutes] = startValue.split(":").map(Number)
-              let newLoadHours = hours
-              let newLoadMinutes = minutes + 15
-
-              if (newLoadMinutes >= 60) {
-                newLoadMinutes -= 60
-                newLoadHours = (newLoadHours + 1) % 24
-              }
-
-              const newLoadTime = `${newLoadHours.toString().padStart(2, "0")}:${newLoadMinutes
-                .toString()
-                .padStart(2, "0")}`
-              handleChange("time", newLoadTime)
-            }
-          }}
-          className="h-8"
-          placeholder="HH:MM"
-        />
+        <div className="space-y-2">
+          <Input
+            value={startTime}
+            onChange={(e) => handleStartTimeChange(e.target.value)}
+            className="h-8"
+            placeholder="HH:MM"
+          />
+          <div className="flex items-center gap-2">
+            <Label htmlFor="timeOffset" className="text-xs whitespace-nowrap">
+              Offset:
+            </Label>
+            <Select value={timeOffset} onValueChange={handleOffsetChange}>
+              <SelectTrigger className="h-7 text-xs">
+                <SelectValue placeholder="Time before" />
+              </SelectTrigger>
+              <SelectContent>
+                {TIME_OFFSET_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
       </td>
       <td className="p-2 border">
         <Input
           value={editedEntry.time}
-          onChange={(e) => handleTimeChange(e.target.value)}
+          onChange={(e) => handleLoadTimeChange(e.target.value)}
           className="h-8"
           placeholder="HH:MM"
         />

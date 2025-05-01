@@ -1,152 +1,164 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { Save, X, UserPlus } from "lucide-react"
-import type { ScheduleEntry, TruckType } from "@/types/schedule"
-import { calculateStartTime } from "@/lib/time-utils"
-import { getDriverNames, getDriverForTruck, getAvailableTruckTypes } from "@/lib/driver-data"
-import { DriverSelector } from "@/components/driver-selector"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-// Import the TruckSelector component
-import { TruckSelector } from "@/components/truck-selector"
+import { Textarea } from "@/components/ui/textarea"
+import { formatTime, parseTimeString, addMinutesToTime } from "@/lib/time-utils"
+import type { ScheduleEntry } from "@/types/schedule"
+import { TimeOffsetSelector } from "./time-offset-selector"
 
 interface EditableRowProps {
   entry: ScheduleEntry
-  index: number
-  type: TruckType
+  onSave: (updatedEntry: ScheduleEntry) => void
   onCancel: () => void
-  onSave: (entry: ScheduleEntry, index: number, type: TruckType) => void
 }
 
-export function EditableRow({ entry, index, type, onCancel, onSave }: EditableRowProps) {
+export function EditableRow({ entry, onSave, onCancel }: EditableRowProps) {
   const [editedEntry, setEditedEntry] = useState<ScheduleEntry>({ ...entry })
-  const [driverDialogOpen, setDriverDialogOpen] = useState(false)
-  const [selectedTruckType, setSelectedTruckType] = useState<string | null>(null)
+  const [timeOffset, setTimeOffset] = useState<number>(15) // Default 15 minutes
 
-  // Get driver names from our hardcoded data
-  const driverNames = getDriverNames()
+  // Calculate initial time offset when component mounts
+  useEffect(() => {
+    if (entry.timeOffset) {
+      setTimeOffset(entry.timeOffset)
+    } else if (entry.startTime && entry.loadTime) {
+      const startTimeDate = parseTimeString(entry.startTime)
+      const loadTimeDate = parseTimeString(entry.loadTime)
 
-  // Get available truck types
-  const truckTypes = getAvailableTruckTypes()
+      if (startTimeDate && loadTimeDate) {
+        // Calculate difference in minutes
+        const diffMs = loadTimeDate.getTime() - startTimeDate.getTime()
+        const diffMinutes = Math.round(diffMs / 60000)
+        setTimeOffset(diffMinutes)
+      }
+    }
+  }, [entry.startTime, entry.loadTime, entry.timeOffset])
 
-  // Calculate start time based on the current time value
-  const startTime = calculateStartTime(editedEntry.time)
+  const handleInputChange = (field: keyof ScheduleEntry, value: string) => {
+    setEditedEntry((prev) => ({ ...prev, [field]: value }))
 
-  // Check if the truck driver field contains a truck number
-  const isTruckNumber = editedEntry.truckDriver && /^(SMI)?\d+[Ps]?$/i.test(editedEntry.truckDriver)
+    // Special handling for time fields
+    if (field === "startTime") {
+      // When start time changes, update load time based on offset
+      const startTime = parseTimeString(value)
+      if (startTime) {
+        const newLoadTime = addMinutesToTime(startTime, timeOffset)
+        setEditedEntry((prev) => ({ ...prev, loadTime: formatTime(newLoadTime) }))
+      }
+    } else if (field === "loadTime") {
+      // When load time changes independently, recalculate the offset
+      const startTime = parseTimeString(editedEntry.startTime || "")
+      const loadTime = parseTimeString(value)
 
-  // If it's a truck number, try to get the driver
-  const truckDriver = isTruckNumber ? getDriverForTruck(editedEntry.truckDriver)?.name || "" : editedEntry.truckDriver
+      if (startTime && loadTime) {
+        const diffMs = loadTime.getTime() - startTime.getTime()
+        const diffMinutes = Math.round(diffMs / 60000)
+        setTimeOffset(diffMinutes > 0 ? diffMinutes : 0)
+      }
+    }
+  }
 
-  const handleChange = (field: keyof ScheduleEntry, value: string) => {
+  const handleOffsetChange = (newOffsetMinutes: number) => {
+    setTimeOffset(newOffsetMinutes)
+
+    // Update the editedEntry with the new timeOffset
     setEditedEntry((prev) => ({
       ...prev,
-      [field]: value,
+      timeOffset: newOffsetMinutes,
     }))
-  }
 
-  const handleDriverSelect = (driverName: string) => {
-    handleChange("truckDriver", driverName)
-    setDriverDialogOpen(false)
-  }
-
-  const openDriverSelector = (truckType?: string) => {
-    setSelectedTruckType(truckType || null)
-    setDriverDialogOpen(true)
+    // Recalculate load time based on start time and new offset
+    if (editedEntry.startTime) {
+      const startTime = parseTimeString(editedEntry.startTime)
+      if (startTime) {
+        const newLoadTime = addMinutesToTime(startTime, newOffsetMinutes)
+        setEditedEntry((prev) => ({ ...prev, loadTime: formatTime(newLoadTime) }))
+      }
+    }
+    // Alternatively, recalculate start time based on load time and new offset
+    else if (editedEntry.loadTime) {
+      const loadTime = parseTimeString(editedEntry.loadTime)
+      if (loadTime) {
+        const newStartTime = addMinutesToTime(loadTime, -newOffsetMinutes)
+        setEditedEntry((prev) => ({ ...prev, startTime: formatTime(newStartTime) }))
+      }
+    }
   }
 
   return (
-    <tr className="bg-primary/5">
-      <td className="p-2 border">
-        <Input value={editedEntry.jobName} onChange={(e) => handleChange("jobName", e.target.value)} className="h-8" />
-      </td>
-      <td className="p-2 border">
-        <div className="text-sm text-muted-foreground">{startTime}</div>
-      </td>
-      <td className="p-2 border">
-        <Input value={editedEntry.time} onChange={(e) => handleChange("time", e.target.value)} className="h-8" />
-      </td>
-      <td className="p-2 border">
+    <tr className="bg-blue-50 border-b">
+      <td className="p-2">
         <Input
-          value={editedEntry.location}
-          onChange={(e) => handleChange("location", e.target.value)}
-          className="h-8"
+          value={editedEntry.jobNumber || ""}
+          onChange={(e) => handleInputChange("jobNumber", e.target.value)}
+          className="w-full"
         />
       </td>
-      <td className="p-2 border">
-        <div className="flex flex-col gap-2">
-          <Input
-            value={editedEntry.truckDriver}
-            onChange={(e) => handleChange("truckDriver", e.target.value)}
-            className="h-8"
-            placeholder="Enter truck # or driver name"
-          />
-
-          <TruckSelector truckType={type} onSelectTruck={(truckId) => handleChange("truckDriver", truckId)} />
-
-          <div className="flex gap-2">
-            <Dialog open={driverDialogOpen} onOpenChange={setDriverDialogOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline" size="sm" className="h-8 px-2">
-                  <UserPlus className="h-4 w-4 mr-1" />
-                  All Drivers
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-3xl">
-                <DialogHeader>
-                  <DialogTitle>Select Driver</DialogTitle>
-                </DialogHeader>
-                <DriverSelector onSelectDriver={handleDriverSelect} initialTruckType={selectedTruckType || undefined} />
-              </DialogContent>
-            </Dialog>
-
-            <Select onValueChange={(value) => openDriverSelector(value)}>
-              <SelectTrigger className="h-8">
-                <SelectValue placeholder="By Truck Type" />
-              </SelectTrigger>
-              <SelectContent>
-                {truckTypes.map((type) => (
-                  <SelectItem key={type} value={type}>
-                    {type}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {isTruckNumber && truckDriver && (
-            <div className="mt-1 text-xs text-muted-foreground">
-              Driver: {truckDriver}
-              {getDriverForTruck(editedEntry.truckDriver)?.truckType && (
-                <span className="ml-1">({getDriverForTruck(editedEntry.truckDriver)?.truckType})</span>
-              )}
-            </div>
-          )}
-        </div>
-      </td>
-      <td className="p-2 border">
+      <td className="p-2">
         <Input
-          value={editedEntry.materials}
-          onChange={(e) => handleChange("materials", e.target.value)}
-          className="h-8"
+          value={editedEntry.startTime || ""}
+          onChange={(e) => handleInputChange("startTime", e.target.value)}
+          className="w-full"
+          placeholder="HH:MM AM/PM"
         />
       </td>
-      <td className="p-2 border">
-        <Input value={editedEntry.qty} onChange={(e) => handleChange("qty", e.target.value)} className="h-8" />
+      <td className="p-2">
+        <Input
+          value={editedEntry.loadTime || ""}
+          onChange={(e) => handleInputChange("loadTime", e.target.value)}
+          className="w-full"
+          placeholder="HH:MM AM/PM"
+        />
       </td>
-      <td className="p-2 border">
-        <Input value={editedEntry.notes} onChange={(e) => handleChange("notes", e.target.value)} className="h-8" />
+      <td className="p-2">
+        <TimeOffsetSelector currentOffset={timeOffset} onOffsetChange={handleOffsetChange} />
       </td>
-      <td className="p-2 border">
-        <div className="flex gap-1">
-          <Button variant="ghost" size="sm" onClick={() => onSave(editedEntry, index, type)}>
-            <Save className="h-4 w-4" />
+      <td className="p-2">
+        <Input
+          value={editedEntry.contractor || ""}
+          onChange={(e) => handleInputChange("contractor", e.target.value)}
+          className="w-full"
+        />
+      </td>
+      <td className="p-2">
+        <Input
+          value={editedEntry.material || ""}
+          onChange={(e) => handleInputChange("material", e.target.value)}
+          className="w-full"
+        />
+      </td>
+      <td className="p-2">
+        <Input
+          value={editedEntry.quantity?.toString() || ""}
+          onChange={(e) => handleInputChange("quantity", e.target.value)}
+          className="w-full"
+          type="number"
+        />
+      </td>
+      <td className="p-2">
+        <Input
+          value={editedEntry.numberOfTrucks?.toString() || ""}
+          onChange={(e) => handleInputChange("numberOfTrucks", e.target.value)}
+          className="w-full"
+          type="number"
+        />
+      </td>
+      <td className="p-2">
+        <Textarea
+          value={editedEntry.notes || ""}
+          onChange={(e) => handleInputChange("notes", e.target.value)}
+          className="w-full"
+          rows={2}
+        />
+      </td>
+      <td className="p-2">
+        <div className="flex space-x-2">
+          <Button onClick={() => onSave(editedEntry)} variant="default" size="sm">
+            Save
           </Button>
-          <Button variant="ghost" size="sm" onClick={onCancel}>
-            <X className="h-4 w-4" />
+          <Button onClick={onCancel} variant="outline" size="sm">
+            Cancel
           </Button>
         </div>
       </td>

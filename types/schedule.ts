@@ -12,7 +12,8 @@ export interface ScheduleEntry {
   qty: string
   materials: string
   notes: string
-  numTrucks?: string // Add this field
+  numTrucks?: string
+  timeOffset?: number // Add this field to store the time offset
 }
 
 export interface ScheduleData {

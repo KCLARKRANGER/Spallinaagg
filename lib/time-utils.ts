@@ -2,8 +2,8 @@
  * Time Utility functions
  */
 
-// Helper function to calculate start time (15 minutes before load time)
-export function calculateStartTime(loadTime: string): string {
+// Helper function to calculate start time based on load time and offset in minutes
+export function calculateStartTime(loadTime: string, offsetMinutes = 15): string {
   if (!loadTime) return "" // Return empty string instead of "N/A"
 
   try {
@@ -33,9 +33,9 @@ export function calculateStartTime(loadTime: string): string {
       return "" // Return empty string for invalid formats
     }
 
-    // Subtract 15 minutes
-    minutes -= 15
-    if (minutes < 0) {
+    // Subtract the specified offset minutes (using the provided offsetMinutes parameter)
+    minutes -= offsetMinutes
+    while (minutes < 0) {
       minutes += 60
       hours -= 1
     }
@@ -47,6 +47,32 @@ export function calculateStartTime(loadTime: string): string {
     return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
   } catch (e) {
     console.error("Error calculating start time:", e)
+    return "" // Return empty string on error
+  }
+}
+
+// Helper function to calculate load time based on start time and offset in minutes
+export function calculateLoadTime(startTime: string, offsetMinutes = 15): string {
+  if (!startTime) return "" // Return empty string for invalid input
+
+  try {
+    // Parse the start time
+    const [hoursStr, minutesStr] = startTime.split(":")
+    let hours = Number.parseInt(hoursStr, 10)
+    let minutes = Number.parseInt(minutesStr, 10)
+
+    // Add the specified offset minutes (using the provided offsetMinutes parameter)
+    minutes += offsetMinutes
+    while (minutes >= 60) {
+      minutes -= 60
+      hours += 1
+    }
+    hours = hours % 24
+
+    // Format the load time in 24-hour format
+    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
+  } catch (e) {
+    console.error("Error calculating load time:", e)
     return "" // Return empty string on error
   }
 }
@@ -99,6 +125,13 @@ export function formatTime(timeStr: string): string {
   return convertTo24HourFormat(timeStr)
 }
 
+// Add or update the addMinutesToTime function to ensure it works correctly
+export function addMinutesToTime(date: Date, minutes: number): Date {
+  const newDate = new Date(date)
+  newDate.setMinutes(newDate.getMinutes() + minutes)
+  return newDate
+}
+
 // Update print colors function to handle dynamic truck types
 export function getPrintTruckTypeColor(type: string): string {
   const colorMap: Record<string, string> = {
@@ -131,4 +164,53 @@ export function getPrintTruckTypeColor(type: string): string {
   const knownTypes = Object.keys(colorMap).length
   const colorIndex = knownTypes % additionalPrintColors.length
   return additionalPrintColors[colorIndex]
+}
+
+// Parse a time string into a Date object
+export function parseTimeString(timeStr: string): Date | null {
+  if (!timeStr) return null
+
+  try {
+    const today = new Date()
+    today.setSeconds(0)
+    today.setMilliseconds(0)
+
+    // Handle 24-hour format (HH:MM)
+    if (/^\d{1,2}:\d{2}$/.test(timeStr)) {
+      const [hours, minutes] = timeStr.split(":").map(Number)
+      today.setHours(hours)
+      today.setMinutes(minutes)
+      return today
+    }
+
+    // Handle military time format (e.g., "0900")
+    if (/^\d{3,4}$/.test(timeStr)) {
+      const paddedTime = timeStr.padStart(4, "0")
+      const hours = Number.parseInt(paddedTime.substring(0, 2), 10)
+      const minutes = Number.parseInt(paddedTime.substring(2, 4), 10)
+      today.setHours(hours)
+      today.setMinutes(minutes)
+      return today
+    }
+
+    // Handle AM/PM format
+    if (/^\d{1,2}:\d{2}\s*[AP]M$/i.test(timeStr)) {
+      const isPM = /PM/i.test(timeStr)
+      const [hours, minutesPart] = timeStr.split(":")
+      const minutes = Number.parseInt(minutesPart.replace(/[^\d]/g, ""), 10)
+      let hoursNum = Number.parseInt(hours, 10)
+
+      if (isPM && hoursNum < 12) hoursNum += 12
+      if (!isPM && hoursNum === 12) hoursNum = 0
+
+      today.setHours(hoursNum)
+      today.setMinutes(minutes)
+      return today
+    }
+
+    return null
+  } catch (e) {
+    console.error("Error parsing time string:", e)
+    return null
+  }
 }
