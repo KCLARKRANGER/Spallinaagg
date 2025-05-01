@@ -1,9 +1,9 @@
 "use client"
 
 import { useState } from "react"
+import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Edit, X, Save } from "lucide-react"
+import { Check } from "lucide-react"
 
 interface DriverTimeEditorProps {
   driverName: string
@@ -21,17 +21,10 @@ export function DriverTimeEditor({
   editMode,
 }: DriverTimeEditorProps) {
   const [isEditing, setIsEditing] = useState(false)
-  const [selectedTime, setSelectedTime] = useState(initialTime)
-
-  // Generate time options in 15-minute increments (00, 15, 30, 45)
-  const timeOptions = Array.from({ length: 96 }).map((_, i) => {
-    const hours = Math.floor(i / 4)
-    const minutes = (i % 4) * 15
-    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
-  })
+  const [timeValue, setTimeValue] = useState(initialTime)
 
   const handleSave = () => {
-    onTimeChange(driverName, truckNumber, selectedTime)
+    onTimeChange(driverName, truckNumber, timeValue)
     setIsEditing(false)
   }
 
@@ -39,37 +32,29 @@ export function DriverTimeEditor({
     return <span>{initialTime}</span>
   }
 
+  if (isEditing) {
+    return (
+      <div className="flex items-center gap-1">
+        <Input
+          value={timeValue}
+          onChange={(e) => setTimeValue(e.target.value)}
+          className="h-8 w-24"
+          placeholder="HH:MM"
+        />
+        <Button variant="ghost" size="sm" onClick={handleSave} className="h-8 w-8 p-0">
+          <Check className="h-4 w-4" />
+        </Button>
+      </div>
+    )
+  }
+
   return (
-    <div className="flex items-center gap-2">
-      {isEditing ? (
-        <>
-          <Select value={selectedTime} onValueChange={setSelectedTime}>
-            <SelectTrigger className="w-[120px] h-8">
-              <SelectValue placeholder={initialTime} />
-            </SelectTrigger>
-            <SelectContent className="max-h-[300px]">
-              {timeOptions.map((time) => (
-                <SelectItem key={time} value={time}>
-                  {time}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button variant="ghost" size="sm" onClick={handleSave} title="Save">
-            <Save className="h-4 w-4" />
-          </Button>
-          <Button variant="ghost" size="sm" onClick={() => setIsEditing(false)} title="Cancel">
-            <X className="h-4 w-4" />
-          </Button>
-        </>
-      ) : (
-        <>
-          <span>{initialTime}</span>
-          <Button variant="ghost" size="sm" onClick={() => setIsEditing(true)} title="Edit Time">
-            <Edit className="h-4 w-4" />
-          </Button>
-        </>
-      )}
+    <div
+      className="cursor-pointer hover:underline hover:text-primary"
+      onClick={() => setIsEditing(true)}
+      title="Click to edit"
+    >
+      {initialTime}
     </div>
   )
 }

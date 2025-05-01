@@ -435,7 +435,7 @@ function TruckTypeSection({
           <thead>
             <tr className="bg-muted">
               <th className="p-2 text-left border">Task Name</th>
-              <th className="p-2 text-left border">Start Time</th>
+              <th className="p-2 text-left border">Show-up Time</th>
               <th className="p-2 text-left border">Load Time</th>
               <th className="p-2 text-left border">Location</th>
               <th className="p-2 text-left border">Driver</th>
@@ -460,14 +460,23 @@ function TruckTypeSection({
                 }
               }
 
-              // Calculate start time using the entry's timeOffset if available
-              const startTime = calculateStartTime(displayTime, entry.timeOffset || 15)
+              // Calculate show-up time if not available
+              let showUpTime = entry.showUpTime || ""
+
+              // If show-up time is still not available but we have a load time, calculate it
+              if (!showUpTime && displayTime) {
+                const offset = Number(entry.showUpOffset || "15")
+                showUpTime = addMinutesToTimeString(convertTo24HourFormat(displayTime), -offset)
+              }
+
+              // If still no show-up time, display N/A
+              if (!showUpTime) showUpTime = "N/A"
 
               if (isEditing) {
                 return (
                   <EditableRow
                     key={`${entry.jobName}-${entry.truckDriver}-${index}-edit`}
-                    entry={{ ...entry, time: displayTime || entry.time }}
+                    entry={{ ...entry, time: displayTime || entry.time, showUpTime }}
                     index={index}
                     type={type}
                     onCancel={onCancelEditing}
@@ -491,7 +500,7 @@ function TruckTypeSection({
                       )}
                     </div>
                   </td>
-                  <td className="p-2 border">{convertTo24HourFormat(startTime)}</td>
+                  <td className="p-2 border">{convertTo24HourFormat(showUpTime)}</td>
                   <td className="p-2 border">{convertTo24HourFormat(displayTime)}</td>
                   <td className="p-2 border">{entry.location}</td>
                   <td className="p-2 border">
@@ -571,29 +580,7 @@ const TIME_OFFSET_OPTIONS = [
 
 function EditableRow({ entry, index, type, onCancel, onSave }: EditableRowProps) {
   const [editedEntry, setEditedEntry] = useState<ScheduleEntry>({ ...entry })
-  const [startTime, setStartTime] = useState<string>(calculateStartTime(entry.time))
-  const [timeOffset, setTimeOffset] = useState<string>((entry.timeOffset || 15).toString())
-
-  // Update start time when time offset changes
-  useEffect(() => {
-    if (editedEntry.time && /^\d{1,2}:\d{2}$/.test(editedEntry.time)) {
-      const offsetMinutes = Number.parseInt(timeOffset, 10)
-      const [hours, minutes] = editedEntry.time.split(":").map(Number)
-
-      // Calculate start time by subtracting the offset
-      let newStartHours = hours
-      let newStartMinutes = minutes - offsetMinutes
-
-      // Handle minute underflow
-      while (newStartMinutes < 0) {
-        newStartMinutes += 60
-        newStartHours = (newStartHours - 1 + 24) % 24
-      }
-
-      const newStartTime = `${newStartHours.toString().padStart(2, "0")}:${newStartMinutes.toString().padStart(2, "0")}`
-      setStartTime(newStartTime)
-    }
-  }, [timeOffset, editedEntry.time])
+  const [showUpOffset, setShowUpOffset] = useState<string>(entry.showUpOffset || "15") // Default to 15 minutes if not specified
 
   const handleChange = (field: keyof ScheduleEntry, value: string) => {
     setEditedEntry((prev) => ({
@@ -602,78 +589,40 @@ function EditableRow({ entry, index, type, onCancel, onSave }: EditableRowProps)
     }))
   }
 
-  // Handle start time change - updates load time based on offset
-  const handleStartTimeChange = (value: string) => {
+  // Handle show-up time change - updates load time based on offset
+  const handleShowUpTimeChange = (value: string) => {
+    handleChange("showUpTime", value)
+
+    // If show-up time changes, update load time based on the offset
     if (value && /^\d{1,2}:\d{2}$/.test(value)) {
-      const offsetMinutes = Number.parseInt(timeOffset, 10)
-      const [hours, minutes] = value.split(":").map(Number)
-
-      // Calculate new load time by adding the offset
-      let newLoadHours = hours
-      let newLoadMinutes = minutes + offsetMinutes
-
-      // Handle minute overflow
-      while (newLoadMinutes >= 60) {
-        newLoadMinutes -= 60
-        newLoadHours = (newLoadHours + 1) % 24
-      }
-
-      const newLoadTime = `${newLoadHours.toString().padStart(2, "0")}:${newLoadMinutes.toString().padStart(2, "0")}`
-
-      setStartTime(value)
+      const offsetMinutes = Number.parseInt(showUpOffset, 10)
+      const newLoadTime = addMinutesToTimeString(value, offsetMinutes)
       handleChange("time", newLoadTime)
-    } else {
-      setStartTime(value)
     }
   }
 
-  // Handle load time change - updates start time based on offset
+  // Handle load time change - updates show-up time based on offset
   const handleLoadTimeChange = (value: string) => {
     handleChange("time", value)
+
+    // If load time changes, update show-up time based on the offset
     if (value && /^\d{1,2}:\d{2}$/.test(value)) {
-      const offsetMinutes = Number.parseInt(timeOffset, 10)
-      const [hours, minutes] = value.split(":").map(Number)
-
-      // Calculate new start time by subtracting the offset
-      let newStartHours = hours
-      let newStartMinutes = minutes - offsetMinutes
-
-      // Handle minute underflow
-      while (newStartMinutes < 0) {
-        newStartMinutes += 60
-        newStartHours = (newStartHours - 1 + 24) % 24
-      }
-
-      const newStartTime = `${newStartHours.toString().padStart(2, "0")}:${newStartMinutes.toString().padStart(2, "0")}`
-      setStartTime(newStartTime)
+      const offsetMinutes = Number.parseInt(showUpOffset, 10)
+      const newShowUpTime = addMinutesToTimeString(value, -offsetMinutes)
+      handleChange("showUpTime", newShowUpTime)
     }
   }
 
-  // Handle offset change - recalculates start time based on load time
+  // Handle offset change - recalculates show-up time based on load time
   const handleOffsetChange = (value: string) => {
-    setTimeOffset(value)
-    // Update the editedEntry with the new timeOffset
-    setEditedEntry((prev) => ({
-      ...prev,
-      timeOffset: Number.parseInt(value, 10),
-    }))
+    setShowUpOffset(value)
+    handleChange("showUpOffset", value)
 
+    // Update show-up time based on the new offset
     if (editedEntry.time && /^\d{1,2}:\d{2}$/.test(editedEntry.time)) {
       const offsetMinutes = Number.parseInt(value, 10)
-      const [hours, minutes] = editedEntry.time.split(":").map(Number)
-
-      // Calculate new start time by subtracting the offset
-      let newStartHours = hours
-      let newStartMinutes = minutes - offsetMinutes
-
-      // Handle minute underflow
-      while (newStartMinutes < 0) {
-        newStartMinutes += 60
-        newStartHours = (newStartHours - 1 + 24) % 24
-      }
-
-      const newStartTime = `${newStartHours.toString().padStart(2, "0")}:${newStartMinutes.toString().padStart(2, "0")}`
-      setStartTime(newStartTime)
+      const newShowUpTime = addMinutesToTimeString(editedEntry.time, -offsetMinutes)
+      handleChange("showUpTime", newShowUpTime)
     }
   }
 
@@ -708,18 +657,18 @@ function EditableRow({ entry, index, type, onCancel, onSave }: EditableRowProps)
       <td className="p-2 border">
         <div className="space-y-2">
           <Input
-            value={startTime}
-            onChange={(e) => handleStartTimeChange(e.target.value)}
+            value={editedEntry.showUpTime || ""}
+            onChange={(e) => handleShowUpTimeChange(e.target.value)}
             className="h-8"
             placeholder="HH:MM"
           />
           <div className="flex items-center gap-2">
-            <Label htmlFor="timeOffset" className="text-xs whitespace-nowrap">
+            <Label htmlFor="showUpOffset" className="text-xs whitespace-nowrap">
               Offset:
             </Label>
-            <Select value={timeOffset} onValueChange={handleOffsetChange}>
+            <Select value={showUpOffset} onValueChange={handleOffsetChange}>
               <SelectTrigger className="h-7 text-xs">
-                <SelectValue placeholder="Time before" />
+                <SelectValue placeholder="Minutes before" />
               </SelectTrigger>
               <SelectContent>
                 {TIME_OFFSET_OPTIONS.map((option) => (
@@ -799,6 +748,38 @@ function EditableRow({ entry, index, type, onCancel, onSave }: EditableRowProps)
       </td>
     </tr>
   )
+}
+
+// Helper function to add minutes to a time string in HH:MM format
+function addMinutesToTimeString(time: string, minutesToAdd: number): string {
+  if (!time || !/^\d{1,2}:\d{2}$/.test(time)) {
+    return time // Return original if invalid format
+  }
+
+  try {
+    const [hoursStr, minutesStr] = time.split(":")
+    let hours = Number.parseInt(hoursStr, 10)
+    let minutes = Number.parseInt(minutesStr, 10)
+
+    minutes += minutesToAdd
+
+    while (minutes >= 60) {
+      minutes -= 60
+      hours += 1
+    }
+
+    while (minutes < 0) {
+      minutes += 60
+      hours -= 1
+    }
+
+    hours = (hours + 24) % 24 // Keep within 0-23 range
+
+    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
+  } catch (e) {
+    console.error("Error adding minutes to time:", e)
+    return time // Return original on error
+  }
 }
 
 export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
@@ -1017,20 +998,22 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
         // Skip if we couldn't determine a driver name
         if (!driverName || driverName === "TBD" || driverName === "No Driver" || driverName === "Not Assigned") return
 
-        // Extract time from date if time is not available
-        let displayTime = entry.time
-        if (!displayTime && entry.date) {
-          const dateTimeMatch = entry.date.match(/(\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?)/i)
-          if (dateTimeMatch) {
-            displayTime = dateTimeMatch[1]
+        // Use the show-up time if available, otherwise use the load time
+        let showUpTime = entry.showUpTime || ""
+        if (!showUpTime) {
+          // Extract time from date if time is not available
+          let displayTime = entry.time
+          if (!displayTime && entry.date) {
+            const dateTimeMatch = entry.date.match(/(\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?)/i)
+            if (dateTimeMatch) {
+              displayTime = dateTimeMatch[1]
+            }
           }
+          showUpTime = displayTime
         }
 
-        // Calculate start time (15 minutes before load time)
-        const startTime = calculateStartTime(displayTime)
-
         // Convert to 24-hour format for comparison
-        const formattedTime = convertTo24HourFormat(startTime)
+        const formattedTime = convertTo24HourFormat(showUpTime)
 
         // Update the driver's earliest time if this is earlier or if we don't have a time yet
         if (!driverTimesMap[driverName] || formattedTime < driverTimesMap[driverName].time) {
@@ -1189,136 +1172,136 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
 
     // Create the print content
     printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Schedule Report - ${format(reportDate, "MM/dd/yyyy")}</title>
-        <style>
-          @page {
-            size: letter portrait;
-            margin: 0.5in;
-          }
-          body {
-            font-family: Arial, sans-serif;
-            font-size: 10pt;
-            line-height: 1.3;
-            color: black;
-            background: white;
-            margin: 0;
-            padding: 0;
-          }
-          .print-header {
-            text-align: center;
-            margin-bottom: 0.25in;
-          }
-          .print-header h1 {
-            font-size: 16pt;
-            margin: 0;
-            margin-bottom: 4pt;
-          }
-          .print-header p {
-            font-size: 12pt;
-            margin: 0;
-          }
-          .truck-section {
-            margin-bottom: 0.5in;
-            page-break-inside: avoid;
-          }
-          .truck-title {
-            font-size: 14pt;
-            font-weight: bold;
-            margin-bottom: 0.15in;
-            padding: 5pt;
-            border-radius: 4pt;
-            page-break-after: avoid;
-          }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 9pt;
-            margin-bottom: 0.25in;
-            table-layout: fixed;
-          }
-          thead {
-            display: table-header-group; /* This makes headers repeat on each page */
-          }
-          tr {
-            page-break-inside: avoid; /* Prevent rows from breaking across pages */
-          }
-          th, td {
-            padding: 4pt;
-            border: 1pt solid #000;
-            text-align: left;
-            vertical-align: top;
-            overflow: hidden;
-            word-wrap: break-word;
-          }
-          th {
-            background-color: #f0f0f0;
-            font-weight: bold;
-          }
-          tr:nth-child(even) {
-            background-color: #f9f9f9;
-          }
-          .page-footer {
-            position: fixed;
-            bottom: 0.25in;
-            left: 0.5in;
-            right: 0.5in;
-            font-size: 8pt;
-            text-align: center;
-            border-top: 1pt solid #ddd;
-            padding-top: 0.1in;
-          }
-          .page-number {
-            float: right;
-          }
-          .timestamp {
-            float: left;
-          }
-          .page-break {
-            page-break-before: always;
-          }
-          
-          /* Column widths */
-          .col-job-name { width: 15%; }
-          .col-start-time { width: 5%; }
-          .col-load-time { width: 5%; }
-          .col-location { width: 18%; }
-          .col-driver { width: 10%; }
-          .col-materials { width: 15%; }
-          .col-pit { width: 8%; }
-          .col-qty { width: 6%; }
-          .col-trucks { width: 6%; }
-          .col-notes { width: 12%; }
-          
-          /* Driver summary table */
-          .driver-summary {
-            margin-top: 0.5in;
-            page-break-before: always;
-          }
-          .driver-summary h2 {
-            font-size: 14pt;
-            margin-bottom: 0.15in;
-          }
-          .driver-summary table {
-            width: 100%;
-          }
-          .driver-summary th {
-            background-color: #f0f0f0;
-          }
-          .col-driver-name { width: 40%; }
-          .col-truck-num { width: 25%; }
-          .col-show-time { width: 35%; }
-        </style>
-      </head>
-      <body>
-        <div class="print-header">
-          <h1>Spallina Materials Trucking Scheduler</h1>
-          <p>${formattedDate}</p>
-          ${dispatcherNotes.trim() ? `<p style="font-weight: bold; font-style: italic; margin-top: 6pt;">${dispatcherNotes}</p>` : ""}
-        </div>
-    `)
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Schedule Report - ${format(reportDate, "MM/dd/yyyy")}</title>
+      <style>
+        @page {
+          size: letter portrait;
+          margin: 0.5in;
+        }
+        body {
+          font-family: Arial, sans-serif;
+          font-size: 10pt;
+          line-height: 1.3;
+          color: black;
+          background: white;
+          margin: 0;
+          padding: 0;
+        }
+        .print-header {
+          text-align: center;
+          margin-bottom: 0.25in;
+        }
+        .print-header h1 {
+          font-size: 16pt;
+          margin: 0;
+          margin-bottom: 4pt;
+        }
+        .print-header p {
+          font-size: 12pt;
+          margin: 0;
+        }
+        .truck-section {
+          margin-bottom: 0.5in;
+          page-break-inside: avoid;
+        }
+        .truck-title {
+          font-size: 14pt;
+          font-weight: bold;
+          margin-bottom: 0.15in;
+          padding: 5pt;
+          border-radius: 4pt;
+          page-break-after: avoid;
+        }
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 9pt;
+          margin-bottom: 0.25in;
+          table-layout: fixed;
+        }
+        thead {
+          display: table-header-group; /* This makes headers repeat on each page */
+        }
+        tr {
+          page-break-inside: avoid; /* Prevent rows from breaking across pages */
+        }
+        th, td {
+          padding: 4pt;
+          border: 1pt solid #000;
+          text-align: left;
+          vertical-align: top;
+          overflow: hidden;
+          word-wrap: break-word;
+        }
+        th {
+          background-color: #f0f0f0;
+          font-weight: bold;
+        }
+        tr:nth-child(even) {
+          background-color: #f9f9f9;
+        }
+        .page-footer {
+          position: fixed;
+          bottom: 0.25in;
+          left: 0.5in;
+          right: 0.5in;
+          font-size: 8pt;
+          text-align: center;
+          border-top: 1pt solid #ddd;
+          padding-top: 0.1in;
+        }
+        .page-number {
+          float: right;
+        }
+        .timestamp {
+          float: left;
+        }
+        .page-break {
+          page-break-before: always;
+        }
+        
+        /* Column widths */
+        .col-job-name { width: 15%; }
+        .col-start-time { width: 5%; }
+        .col-load-time { width: 5%; }
+        .col-location { width: 18%; }
+        .col-driver { width: 10%; }
+        .col-materials { width: 15%; }
+        .col-pit { width: 8%; }
+        .col-qty { width: 6%; }
+        .col-trucks { width: 6%; }
+        .col-notes { width: 12%; }
+        
+        /* Driver summary table */
+        .driver-summary {
+          margin-top: 0.5in;
+          page-break-before: always;
+        }
+        .driver-summary h2 {
+          font-size: 14pt;
+          margin-bottom: 0.15in;
+        }
+        .driver-summary table {
+          width: 100%;
+        }
+        .driver-summary th {
+          background-color: #f0f0f0;
+        }
+        .col-driver-name { width: 40%; }
+        .col-truck-num { width: 25%; }
+        .col-show-time { width: 35%; }
+      </style>
+    </head>
+    <body>
+      <div class="print-header">
+        <h1>Spallina Materials Trucking Scheduler</h1>
+        <p>${formattedDate}</p>
+        ${dispatcherNotes.trim() ? `<p style="font-weight: bold; font-style: italic; margin-top: 6pt;">${dispatcherNotes}</p>` : ""}
+      </div>
+  `)
 
     // Add each truck type section
     truckTypes.forEach((type, typeIndex) => {
@@ -1329,25 +1312,25 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
       const pageBreakClass = typeIndex > 0 ? 'class="page-break"' : ""
 
       printWindow.document.write(`
-        <div ${pageBreakClass} class="truck-section">
-          <div class="truck-title" style="background-color: ${getPrintTruckTypeColor(type)}">${type} Schedule</div>
-          <table>
-            <thead>
-              <tr>
-                <th class="col-job-name">Job Name</th>
-                <th class="col-start-time">Start<br>Time</th>
-                <th class="col-load-time">Load<br>Time</th>
-                <th class="col-location">Location</th>
-                <th class="col-driver">Driver</th>
-                <th class="col-materials">Materials</th>
-                <th class="col-pit">Pit<br>Location</th>
-                <th class="col-qty">Quantity</th>
-                <th class="col-trucks"># Trucks</th>
-                <th class="col-notes">Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-      `)
+      <div ${pageBreakClass} class="truck-section">
+        <div class="truck-title" style="background-color: ${getPrintTruckTypeColor(type)}">${type} Schedule</div>
+        <table>
+          <thead>
+            <tr>
+              <th class="col-job-name">Job Name</th>
+              <th class="col-start-time">Start<br>Time</th>
+              <th class="col-load-time">Load<br>Time</th>
+              <th class="col-location">Location</th>
+              <th class="col-driver">Driver</th>
+              <th class="col-materials">Materials</th>
+              <th class="col-pit">Pit<br>Location</th>
+              <th class="col-qty">Quantity</th>
+              <th class="col-trucks"># Trucks</th>
+              <th class="col-notes">Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+    `)
 
       // Add rows for this truck type
       entries.forEach((entry, index) => {
@@ -1360,92 +1343,101 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
           }
         }
 
-        // Calculate start time
-        const startTime = calculateStartTime(displayTime)
+        // Calculate show-up time if not available
+        let showUpTime = entry.showUpTime || ""
+        if (!showUpTime && displayTime) {
+          const offset = Number(entry.showUpOffset || "15")
+          showUpTime = addMinutesToTimeString(convertTo24HourFormat(displayTime), -offset)
+        }
+
+        // Log the values for debugging
+        console.log(
+          `Print Entry: ${entry.jobName}, Driver: ${entry.truckDriver}, ShowUpTime: ${showUpTime}, Load: ${displayTime}`,
+        )
 
         printWindow.document.write(`
-          <tr>
-            <td class="col-job-name">${entry.jobName}</td>
-            <td class="col-start-time">${convertTo24HourFormat(startTime)}</td>
-            <td class="col-load-time">${convertTo24HourFormat(displayTime)}</td>
-            <td class="col-location">${entry.location}</td>
-            <td class="col-driver">${entry.truckDriver}</td>
-            <td class="col-materials">${entry.materials}</td>
-            <td class="col-pit">${entry.pit}</td>
-            <td class="col-qty">${entry.qty}</td>
-            <td class="col-trucks">${entry.numTrucks || "1"}</td>
-            <td class="col-notes">${entry.notes}</td>
-          </tr>
-        `)
+      <tr>
+        <td class="col-job-name">${entry.jobName}</td>
+        <td class="col-start-time">${convertTo24HourFormat(showUpTime)}</td>
+        <td class="col-load-time">${convertTo24HourFormat(displayTime)}</td>
+        <td class="col-location">${entry.location}</td>
+        <td class="col-driver">${entry.truckDriver}</td>
+        <td class="col-materials">${entry.materials}</td>
+        <td class="col-pit">${entry.pit}</td>
+        <td class="col-qty">${entry.qty}</td>
+        <td class="col-trucks">${entry.numTrucks || "1"}</td>
+        <td class="col-notes">${entry.notes}</td>
+      </tr>
+    `)
       })
 
       printWindow.document.write(`
-            </tbody>
-          </table>
-          <div class="page-footer">
-            <span class="timestamp">${format(new Date(), "MM/dd/yyyy hh:mm a")}</span>
-            <span class="page-number">Page <span class="page-num"></span> of <span class="page-count"></span></span>
-          </div>
+          </tbody>
+        </table>
+        <div class="page-footer">
+          <span class="timestamp">${format(new Date(), "MM/dd/yyyy hh:mm a")}</span>
+          <span class="page-number">Page <span class="page-num"></span> of <span class="page-count"></span></span>
         </div>
-      `)
+      </div>
+    `)
     })
 
     // Add driver summary section
     printWindow.document.write(`
-  <div class="driver-summary">
-    <h2>Spallina Drivers Summary</h2>
-    <table>
-      <thead>
-        <tr>
-          <th class="col-driver-name">Driver Name</th>
-          <th class="col-truck-num">Truck #</th>
-          <th class="col-show-time">Show-up Time</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${driverSummary
-          .map(
-            (driver) => `
-          <tr>
-            <td class="col-driver-name">${driver.name}</td>
-            <td class="col-truck-num">${driver.truckNumber}</td>
-            <td class="col-show-time">${driver.time}</td>
-          </tr>
-        `,
-          )
-          .join("")}
-      </tbody>
-    </table>
-    <div class="page-footer">
-      <span class="timestamp">${format(new Date(), "MM/dd/yyyy hh:mm a")}</span>
-      <span class="page-number">Page <span class="page-num"></span> of <span class="page-count"></span></span>
-    </div>
-  </div>
+<div class="driver-summary">
+<h2>Spallina Drivers Summary</h2>
+<table>
+  <thead>
+    <tr>
+      <th class="col-driver-name">Driver Name</th>
+      <th class="col-truck-num">Truck #</th>
+      <th class="col-show-time">Show-up Time</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${driverSummary
+      .map(
+        (driver) => `
+      <tr>
+        <td class="col-driver-name">${driver.name}</td>
+        <td class="col-truck-num">${driver.truckNumber}</td>
+        <td class="col-show-time">${driver.time}</td>
+      </tr>
+    `,
+      )
+      .join("")}
+  </tbody>
+</table>
+<div class="page-footer">
+  <span class="timestamp">${format(new Date(), "MM/dd/yyyy hh:mm a")}</span>
+  <span class="page-number">Page <span class="page-num"></span> of <span class="page-count"></span></span>
+</div>
+</div>
 `)
 
     printWindow.document.write(`
-      <script>
-        // Add page numbers after printing is prepared
-        window.onload = function() {
-          // Count the total number of pages
-          const pageCount = Math.ceil(document.body.scrollHeight / 1056); // Approximate for letter size
-          
-          // Set the page count in all footers
-          const pageCountElements = document.querySelectorAll('.page-count');
-          pageCountElements.forEach(el => {
-            el.textContent = pageCount.toString();
-          });
-          
-          // Set individual page numbers
-          const pageNumElements = document.querySelectorAll('.page-num');
-          pageNumElements.forEach((el, index) => {
-            el.textContent = (index + 1).toString();
-          });
-        };
-      </script>
-      </body>
-      </html>
-    `)
+  <script>
+    // Add page numbers after printing is prepared
+    window.onload = function() {
+      // Count the total number of pages
+      const pageCount = Math.ceil(document.body.scrollHeight / 1056); // Approximate for letter size
+      
+      // Set the page count in all footers
+      const pageCountElements = document.querySelectorAll('.page-count');
+      pageCountElements.forEach(el => {
+        el.textContent = pageCount.toString();
+      });
+      
+      // Set individual page numbers
+      const pageNumElements = document.querySelectorAll('.page-num');
+      pageNumElements.forEach((el, index) => {
+        el.textContent = (index + 1).toString();
+      });
+    };
+  </script>
+  </body>
+  </html>
+`)
 
     printWindow.document.close()
 

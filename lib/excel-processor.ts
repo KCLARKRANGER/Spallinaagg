@@ -2,6 +2,7 @@ import * as XLSX from "xlsx"
 import type { ScheduleData, ScheduleEntry, TruckType } from "@/types/schedule"
 import { parseCSV } from "./csv-parser"
 import { assignMissingPitLocations } from "./pit-location-mapper"
+import { addMinutesToTimeString, convertTo24HourFormat } from "./time-utils"
 
 export async function processExcelFile(file: File): Promise<ScheduleData> {
   try {
@@ -65,14 +66,7 @@ export function processScheduleData(data: any[]): ScheduleData {
 
     console.log(`Row ${index} - Job: ${jobName}, Truck: ${truckType}, Drivers: ${driversAssigned}`)
 
-    // Replace this block:
-    // Skip rows with no truck type or "Unspecified" truck type
-    // if (!truckType) {
-    //   console.log(`Skipping row ${index} - No truck type specified`)
-    //   return // Skip this row
-    // }
-
-    // With this code that assigns "Undefined" as the truck type:
+    // With this code that assigns "Dump Truck" as the default truck type:
     const finalTruckType = truckType || "Dump Truck"
     if (!truckType) {
       console.warn(`Warning: Row ${index} (${jobName}) has undefined truck type - assigning default "Dump Truck"`)
@@ -123,8 +117,6 @@ export function processScheduleData(data: any[]): ScheduleData {
     }
 
     // Find the line where location is extracted and update it to use column I
-    // Replace this line:
-    // const location = (row["LOCATION (location)"] || "").toString()
     const location = (
       row["LOCATION (short text)"] ||
       row["I"] ||
@@ -182,11 +174,10 @@ export function processScheduleData(data: any[]): ScheduleData {
       }
     }
 
-    // Get the number of trucks required (from column M)
-    // Replace this line:
-    // const numTrucksStr = (row["Number of Trucks"] || row["# of Trucks"] || "1").toString()
+    // Get the number of trucks required (from column L)
     const numTrucksStr = (
       row["Number of Trucks (number)"] ||
+      row["L"] ||
       row["Number of Trucks"] ||
       row["# of Trucks"] ||
       "1"
@@ -204,16 +195,89 @@ export function processScheduleData(data: any[]): ScheduleData {
       numTrucks = 1
     }
 
-    console.log(`Row ${index} - Number of trucks required: ${numTrucks}`)
+    console.log(`Row ${index} - Number of trucks required: ${numTrucks} (from column L: ${numTrucksStr})`)
+
+    // Get the interval between trucks (from column M)
+    const intervalStr = (
+      row["Interval Between Trucks (minutes)"] ||
+      row["Interval Between Trucks (number)"] ||
+      row["M"] ||
+      "0"
+    ).toString()
+    let interval = 0
+
+    try {
+      interval = Number.parseInt(intervalStr)
+      if (isNaN(interval)) interval = 0
+    } catch (e) {
+      console.warn("Could not parse interval between trucks:", intervalStr)
+      interval = 0
+    }
+
+    console.log(`Row ${index} - Interval between trucks: ${interval} minutes (from column M: ${intervalStr})`)
+
+    // Get the show-up time offset (from column N)
+    // If no value is provided, use the standard 15-minute offset
+    const showUpOffsetStr = (
+      row["Show-up Time Offset (minutes)"] ||
+      row["Minutes Before Shift (SHOWUPTIME) (number)"] ||
+      row["N"] ||
+      ""
+    ).toString()
+
+    let showUpOffset = 15 // Default to 15 minutes if not specified
+
+    if (showUpOffsetStr.trim() !== "") {
+      try {
+        showUpOffset = Number.parseInt(showUpOffsetStr)
+        if (isNaN(showUpOffset)) showUpOffset = 15
+      } catch (e) {
+        console.warn("Could not parse show-up time offset:", showUpOffsetStr)
+        showUpOffset = 15
+      }
+    }
+
+    console.log(`Row ${index} - Show-up time offset: ${showUpOffset} minutes`)
+
+    // Convert time to 24-hour format for consistency
+    const formattedTime = convertTo24HourFormat(time)
+
+    // Calculate show-up time based on load time and offset
+    let showUpTime = ""
+    if (formattedTime) {
+      showUpTime = addMinutesToTimeString(formattedTime, -showUpOffset)
+      console.log(
+        `Row ${index} - Calculated show-up time: ${showUpTime} (${showUpOffset} minutes before ${formattedTime})`,
+      )
+    }
 
     // UPDATED LOGIC: Handle both cases for duplicating entries
+    // Apply staggering for ALL truck types, including Asphalt
 
     // Case 1: If we have specific drivers assigned, create an entry for each driver
     if (driversList.length > 0 && driversList[0] !== "TBD") {
       console.log(`Creating ${driversList.length} entries based on assigned drivers`)
 
-      // Create an entry for each driver
-      driversList.forEach((driver) => {
+      // Create an entry for each driver with staggered start times
+      driversList.forEach((driver, driverIndex) => {
+        // Calculate staggered time based on interval
+        let staggeredTime = formattedTime
+        if (interval > 0 && driverIndex > 0) {
+          staggeredTime = addMinutesToTimeString(formattedTime, interval * driverIndex)
+          console.log(
+            `Driver ${driver} (index ${driverIndex}): Staggered load time = ${staggeredTime} (${interval * driverIndex} minutes after first driver)`,
+          )
+        }
+
+        // Calculate show-up time based on offset and the staggered load time
+        let driverShowUpTime = ""
+        if (staggeredTime) {
+          driverShowUpTime = addMinutesToTimeString(staggeredTime, -showUpOffset)
+          console.log(
+            `Driver ${driver}: Show-up time = ${driverShowUpTime} (${showUpOffset} minutes before ${staggeredTime})`,
+          )
+        }
+
         const entry: ScheduleEntry = {
           jobName,
           truckType: finalTruckType,
@@ -221,12 +285,15 @@ export function processScheduleData(data: any[]): ScheduleData {
           shift: normalizedShift,
           truckDriver: driver,
           date,
-          time,
+          time: staggeredTime,
+          showUpTime: driverShowUpTime, // Add the show-up time
           location,
           qty,
           materials,
           notes,
-          numTrucks: numTrucksStr, // Add this line
+          numTrucks: numTrucksStr,
+          interval: interval.toString(), // Store the interval
+          showUpOffset: showUpOffset.toString(), // Store the show-up offset
         }
 
         allEntries.push(entry)
@@ -241,10 +308,29 @@ export function processScheduleData(data: any[]): ScheduleData {
     }
     // Case 2: If we have a specific number of trucks required, create that many entries
     else if (numTrucks > 1) {
-      console.log(`Creating ${numTrucks} entries based on Number of Trucks column`)
+      console.log(`Creating ${numTrucks} entries based on Number of Trucks column (${numTrucksStr})`)
+      console.log(`Using interval of ${interval} minutes between trucks`)
 
-      // Create entries based on numTrucks
+      // Create entries based on numTrucks with staggered start times
       for (let i = 0; i < numTrucks; i++) {
+        // Calculate staggered time based on interval
+        let staggeredTime = formattedTime
+        if (interval > 0 && i > 0) {
+          staggeredTime = addMinutesToTimeString(formattedTime, interval * i)
+          console.log(
+            `Truck ${i + 1}: Staggered load time = ${staggeredTime} (${interval * i} minutes after first truck)`,
+          )
+        }
+
+        // Calculate show-up time based on offset and the staggered load time
+        let truckShowUpTime = ""
+        if (staggeredTime) {
+          truckShowUpTime = addMinutesToTimeString(staggeredTime, -showUpOffset)
+          console.log(
+            `Truck ${i + 1}: Show-up time = ${truckShowUpTime} (${showUpOffset} minutes before ${staggeredTime})`,
+          )
+        }
+
         const entry: ScheduleEntry = {
           jobName,
           truckType: finalTruckType,
@@ -252,12 +338,15 @@ export function processScheduleData(data: any[]): ScheduleData {
           shift: normalizedShift,
           truckDriver: "TBD",
           date,
-          time,
+          time: staggeredTime,
+          showUpTime: truckShowUpTime, // Add the show-up time
           location,
           qty,
           materials,
           notes,
-          numTrucks: numTrucksStr, // Add this line
+          numTrucks: numTrucksStr,
+          interval: interval.toString(), // Store the interval
+          showUpOffset: showUpOffset.toString(), // Store the show-up offset
         }
 
         allEntries.push(entry)
@@ -274,6 +363,15 @@ export function processScheduleData(data: any[]): ScheduleData {
     else {
       console.log(`Creating a single entry (default case)`)
 
+      // Calculate show-up time based on offset
+      let singleShowUpTime = ""
+      if (formattedTime) {
+        singleShowUpTime = addMinutesToTimeString(formattedTime, -showUpOffset)
+        console.log(
+          `Single entry: Show-up time = ${singleShowUpTime} (${showUpOffset} minutes before ${formattedTime})`,
+        )
+      }
+
       const entry: ScheduleEntry = {
         jobName,
         truckType: finalTruckType,
@@ -281,12 +379,15 @@ export function processScheduleData(data: any[]): ScheduleData {
         shift: normalizedShift,
         truckDriver: "TBD",
         date,
-        time,
+        time: formattedTime,
+        showUpTime: singleShowUpTime, // Add the show-up time
         location,
         qty,
         materials,
         notes,
-        numTrucks: numTrucksStr, // Add this line
+        numTrucks: numTrucksStr,
+        interval: interval.toString(), // Store the interval
+        showUpOffset: showUpOffset.toString(), // Store the show-up offset
       }
 
       allEntries.push(entry)

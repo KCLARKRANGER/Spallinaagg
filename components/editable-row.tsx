@@ -20,9 +20,7 @@ export function EditableRow({ entry, onSave, onCancel }: EditableRowProps) {
 
   // Calculate initial time offset when component mounts
   useEffect(() => {
-    if (entry.timeOffset) {
-      setTimeOffset(entry.timeOffset)
-    } else if (entry.startTime && entry.loadTime) {
+    if (entry.startTime && entry.loadTime) {
       const startTimeDate = parseTimeString(entry.startTime)
       const loadTimeDate = parseTimeString(entry.loadTime)
 
@@ -33,7 +31,7 @@ export function EditableRow({ entry, onSave, onCancel }: EditableRowProps) {
         setTimeOffset(diffMinutes)
       }
     }
-  }, [entry.startTime, entry.loadTime, entry.timeOffset])
+  }, [entry.startTime, entry.loadTime])
 
   const handleInputChange = (field: keyof ScheduleEntry, value: string) => {
     setEditedEntry((prev) => ({ ...prev, [field]: value }))
@@ -61,12 +59,6 @@ export function EditableRow({ entry, onSave, onCancel }: EditableRowProps) {
 
   const handleOffsetChange = (newOffsetMinutes: number) => {
     setTimeOffset(newOffsetMinutes)
-
-    // Update the editedEntry with the new timeOffset
-    setEditedEntry((prev) => ({
-      ...prev,
-      timeOffset: newOffsetMinutes,
-    }))
 
     // Recalculate load time based on start time and new offset
     if (editedEntry.startTime) {

@@ -8,12 +8,14 @@ export interface ScheduleEntry {
   truckDriver: string
   date: string
   time: string
+  showUpTime?: string // New field for show-up time
   location: string
   qty: string
   materials: string
   notes: string
   numTrucks?: string
-  timeOffset?: number // Add this field to store the time offset
+  interval?: string // New field for interval between trucks
+  showUpOffset?: string // New field for show-up time offset
 }
 
 export interface ScheduleData {
