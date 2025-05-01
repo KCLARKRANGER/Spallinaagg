@@ -2,7 +2,7 @@ import * as XLSX from "xlsx"
 import type { ScheduleData, ScheduleEntry, TruckType } from "@/types/schedule"
 import { parseCSV } from "./csv-parser"
 import { assignMissingPitLocations } from "./pit-location-mapper"
-import { addMinutesToTimeString, convertTo24HourFormat, parseTimeFromDateString } from "./time-utils"
+import { addMinutesToTimeString, convertTo24HourFormat } from "./time-utils"
 
 export async function processExcelFile(file: File): Promise<ScheduleData> {
   try {
@@ -41,6 +41,22 @@ export async function processExcelFile(file: File): Promise<ScheduleData> {
     console.error("Error processing file:", error)
     throw error
   }
+}
+
+// Helper function to parse time from date string
+function parseTimeFromDateString(dateString: string): string {
+  // Try to extract time from formats like "Friday, May 2nd 2025, 6:30:00 am -04:00"
+  const timeMatch = dateString.match(/(\d{1,2}):(\d{2}):(\d{2})\s*(am|pm)/i)
+  if (timeMatch) {
+    const [_, hours, minutes, seconds, ampm] = timeMatch
+    let hoursNum = Number.parseInt(hours, 10)
+    if (ampm.toLowerCase() === "pm" && hoursNum < 12) hoursNum += 12
+    if (ampm.toLowerCase() === "am" && hoursNum === 12) hoursNum = 0
+    return `${hoursNum.toString().padStart(2, "0")}:${minutes}`
+  }
+
+  // Default to empty string if no time found
+  return ""
 }
 
 export function processScheduleData(data: any[]): ScheduleData {
@@ -140,7 +156,7 @@ export function processScheduleData(data: any[]): ScheduleData {
           }
         }
 
-        // Extract time part - use our utility function
+        // Extract time part
         baseTime = parseTimeFromDateString(dateString)
         console.log(`Extracted base time: ${baseTime}`)
       } catch (e) {
@@ -182,8 +198,8 @@ export function processScheduleData(data: any[]): ScheduleData {
 
     // Get the interval between trucks
     const intervalStr = (
-      firstRow["Interval Between Trucks (minutes)"] ||
       firstRow["Interval Between Trucks (number)"] ||
+      firstRow["Interval Between Trucks (minutes)"] ||
       firstRow["M"] ||
       "0"
     ).toString()
@@ -243,13 +259,15 @@ export function processScheduleData(data: any[]): ScheduleData {
     if (driversList.length > 0 && driversList[0] !== "TBD") {
       console.log(`Creating ${driversList.length} entries based on assigned drivers`)
 
+      // IMPORTANT: Process drivers in the exact order they appear in the CSV
       driversList.forEach((driver, driverIndex) => {
-        // Calculate staggered time based on interval
+        // Calculate staggered time based on interval - FORWARD in time
         let staggeredTime = formattedBaseTime
         if (interval > 0 && driverIndex > 0) {
-          staggeredTime = addMinutesToTimeString(formattedBaseTime, -interval * driverIndex)
+          // FIXED: Add interval minutes for each subsequent truck (forward in time)
+          staggeredTime = addMinutesToTimeString(formattedBaseTime, interval * driverIndex)
           console.log(
-            `Driver ${driver} (index ${driverIndex}): Staggered time = ${staggeredTime} (${interval * driverIndex} minutes before base time)`,
+            `Driver ${driver} (index ${driverIndex}): Staggered time = ${staggeredTime} (${interval * driverIndex} minutes after base time)`,
           )
         }
 
@@ -293,14 +311,14 @@ export function processScheduleData(data: any[]): ScheduleData {
       console.log(`Creating ${numTrucks} entries based on number of trucks with staggered times`)
 
       for (let i = 0; i < numTrucks; i++) {
-        // Calculate staggered time by SUBTRACTING (i * interval) from the base time
+        // FIXED: Calculate staggered time by ADDING (i * interval) to the base time
         let staggeredTime = formattedBaseTime
         if (interval > 0) {
           // For truck index 0, use the base time
-          // For subsequent trucks, subtract (index * interval) minutes from base time
-          staggeredTime = i === 0 ? formattedBaseTime : addMinutesToTimeString(formattedBaseTime, -interval * i)
+          // For subsequent trucks, add (index * interval) minutes to base time
+          staggeredTime = i === 0 ? formattedBaseTime : addMinutesToTimeString(formattedBaseTime, interval * i)
           console.log(
-            `Truck ${i + 1}: Staggered time = ${staggeredTime} (${i > 0 ? interval * i : 0} minutes before base time)`,
+            `Truck ${i + 1}: Staggered time = ${staggeredTime} (${i > 0 ? interval * i : 0} minutes after base time)`,
           )
         }
 
