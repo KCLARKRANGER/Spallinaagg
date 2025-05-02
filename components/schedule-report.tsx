@@ -263,17 +263,15 @@ function extractReportDate(data: ScheduleData): Date {
     return today
   }
 
-  // First, try to find entries with a Due Date field
+  // First, try to find entries with a properly formatted date
   for (const entry of data.allEntries) {
-    if (entry.date && entry.date.includes("Due Date:")) {
+    if (entry.date && /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(entry.date)) {
       try {
-        const dateMatch = entry.date.match(/Due Date:\s*(.+)/)
-        if (dateMatch && dateMatch[1]) {
-          const parsedDate = new Date(dateMatch[1])
-          if (isValid(parsedDate)) {
-            console.log("Found valid Due Date:", parsedDate)
-            return parsedDate
-          }
+        const [month, day, year] = entry.date.split("/").map(Number)
+        const parsedDate = new Date(year, month - 1, day)
+        if (isValid(parsedDate)) {
+          console.log("Found valid MM/DD/YYYY date:", parsedDate)
+          return parsedDate
         }
       } catch (e) {
         // Continue to next entry
@@ -284,13 +282,31 @@ function extractReportDate(data: ScheduleData): Date {
   // Try to extract from the Monday.com format
   for (const entry of data.allEntries) {
     if (entry.date) {
-      // Try to match Monday.com format: "Monday, March 24th 2025, 7:00:00 am -04:00"
+      // Try to match Monday.com format: "Friday, May 2nd 2025, 7:00:00 am -04:00"
       const mondayMatch = entry.date.match(/([A-Za-z]+),\s+([A-Za-z]+)\s+(\d+)(?:st|nd|rd|th)?\s+(\d{4})/)
       if (mondayMatch) {
         try {
           const [_, dayOfWeek, month, day, year] = mondayMatch
-          const dateStr = `${month} ${day}, ${year}`
-          const parsedDate = new Date(dateStr)
+
+          // Map month names to month numbers
+          const monthMap: Record<string, number> = {
+            January: 0,
+            February: 1,
+            March: 2,
+            April: 3,
+            May: 4,
+            June: 5,
+            July: 6,
+            August: 7,
+            September: 8,
+            October: 9,
+            November: 10,
+            December: 11,
+          }
+
+          const monthNum = monthMap[month] || 0
+          const parsedDate = new Date(Number(year), monthNum, Number(day))
+
           if (isValid(parsedDate)) {
             console.log("Found valid Monday.com date:", parsedDate)
             return parsedDate
@@ -358,8 +374,25 @@ function extractReportDate(data: ScheduleData): Date {
     if (dateMatch) {
       const [_, month, day, year] = dateMatch
       try {
-        const dateStr = `${month} ${day} ${year}`
-        const parsedDate = new Date(dateStr)
+        // Map month names to month numbers
+        const monthMap: Record<string, number> = {
+          January: 0,
+          February: 1,
+          March: 2,
+          April: 3,
+          May: 4,
+          June: 5,
+          July: 6,
+          August: 7,
+          September: 8,
+          October: 9,
+          November: 10,
+          December: 11,
+        }
+
+        const monthNum = monthMap[month] || 0
+        const parsedDate = new Date(Number(year), monthNum, Number(day))
+
         if (isValid(parsedDate)) {
           console.log("Successfully parsed complex date:", parsedDate)
           return parsedDate
@@ -1622,10 +1655,10 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
         // Calculate a new load time (15 minutes after the selected start time)
         const [hours, minutes] = newTime.split(":").map(Number)
         let newLoadHours = hours
-        let newLoadMinutes = minutes + 15
+        const newLoadMinutes = minutes + 15
 
         if (newLoadMinutes >= 60) {
-          newLoadMinutes -= 60
+          newLoadHours -= 60
           newLoadHours = (newLoadHours + 1) % 24
         }
 

@@ -59,6 +59,36 @@ function parseTimeFromDateString(dateString: string): string {
   return ""
 }
 
+// Helper function to parse date from Monday.com format
+function parseDateFromMondayFormat(dateString: string): string {
+  // Try to match format like "Friday, May 2nd 2025, 6:30:00 am -04:00"
+  const dateMatch = dateString.match(/([A-Za-z]+),\s+([A-Za-z]+)\s+(\d+)(?:st|nd|rd|th)?\s+(\d{4})/)
+  if (dateMatch) {
+    const [_, dayOfWeek, month, day, year] = dateMatch
+    // Format as MM/DD/YYYY
+    const monthMap: Record<string, string> = {
+      January: "01",
+      February: "02",
+      March: "03",
+      April: "04",
+      May: "05",
+      June: "06",
+      July: "07",
+      August: "08",
+      September: "09",
+      October: "10",
+      November: "11",
+      December: "12",
+    }
+
+    const monthNum = monthMap[month] || "01"
+    const paddedDay = day.padStart(2, "0")
+    return `${monthNum}/${paddedDay}/${year}`
+  }
+
+  return ""
+}
+
 export function processScheduleData(data: any[]): ScheduleData {
   const allEntries: ScheduleEntry[] = []
   const byTruckType: Record<TruckType, ScheduleEntry[]> = {}
@@ -137,13 +167,10 @@ export function processScheduleData(data: any[]): ScheduleData {
         const dateString = firstRow["Due Date"]
         console.log(`Due Date string: ${dateString}`)
 
-        // Extract date part
-        const dateMatch = dateString.match(/([A-Za-z]+),\s+([A-Za-z]+)\s+(\d+)(?:st|nd|rd|th)?\s+(\d{4})/)
-        if (dateMatch) {
-          const [_, dayOfWeek, month, day, year] = dateMatch
-          date = `${month} ${day}, ${year}`
-        } else {
-          // Try standard date format
+        // Extract date part using our helper function
+        date = parseDateFromMondayFormat(dateString)
+        if (!date) {
+          // Try standard date format as fallback
           const parsedDate = new Date(dateString)
           if (!isNaN(parsedDate.getTime())) {
             date = parsedDate.toLocaleDateString("en-US", {
@@ -155,6 +182,8 @@ export function processScheduleData(data: any[]): ScheduleData {
             date = dateString
           }
         }
+
+        console.log(`Parsed date: ${date}`)
 
         // Extract time part
         baseTime = parseTimeFromDateString(dateString)
