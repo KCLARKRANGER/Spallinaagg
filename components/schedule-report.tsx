@@ -1652,19 +1652,19 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
 
       // If we found the earliest entry, update its time
       if (earliestEntry && earliestEntryType) {
-        // Calculate a new load time (15 minutes after the selected start time)
-        const [hours, minutes] = newTime.split(":").map(Number)
-        let newLoadHours = hours
-        const newLoadMinutes = minutes + 15
+        // Get the show-up offset from the entry or use default
+        const showUpOffset = Number(earliestEntry.showUpOffset || "15")
 
-        if (newLoadMinutes >= 60) {
-          newLoadHours -= 60
-          newLoadHours = (newLoadHours + 1) % 24
-        }
+        // Calculate a new load time based on the show-up time and offset
+        const newLoadTime = addMinutesToTimeString(newTime, showUpOffset)
 
-        const newLoadTime = `${newLoadHours.toString().padStart(2, "0")}:${newLoadMinutes.toString().padStart(2, "0")}`
+        console.log(`Updating time for ${driverName} (${truckNumber}):`)
+        console.log(`  New show-up time: ${newTime}`)
+        console.log(`  Offset: ${showUpOffset} minutes`)
+        console.log(`  New load time: ${newLoadTime}`)
 
-        // Update the entry's time
+        // Update the entry's times
+        newData.byTruckType[earliestEntryType][earliestEntryIndex].showUpTime = newTime
         newData.byTruckType[earliestEntryType][earliestEntryIndex].time = newLoadTime
 
         // Also update in allEntries
@@ -1673,6 +1673,7 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
         )
 
         if (allEntriesIndex !== -1) {
+          newData.allEntries[allEntriesIndex].showUpTime = newTime
           newData.allEntries[allEntriesIndex].time = newLoadTime
         }
 

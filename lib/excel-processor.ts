@@ -243,22 +243,26 @@ export function processScheduleData(data: any[]): ScheduleData {
     }
     console.log(`Interval between trucks: ${interval} minutes`)
 
-    // Get the show-up time offset
+    // Get the show-up time offset - CRITICAL FIX HERE
+    // Check all possible column names for the show-up offset
     const showUpOffsetStr = (
-      firstRow["Show-up Time Offset (minutes)"] ||
       firstRow["Minutes Before Shift (SHOWUPTIME) (number)"] ||
+      firstRow["Minutes Before Shift"] ||
+      firstRow["Show-up Time Offset (minutes)"] ||
       firstRow["N"] ||
       ""
     ).toString()
 
-    let showUpOffset = 15 // Default to 15 minutes
-    if (showUpOffsetStr.trim() !== "") {
+    // Default to 15 minutes ONLY if no value is provided
+    let showUpOffset = 15
+    if (showUpOffsetStr && showUpOffsetStr.trim() !== "") {
       try {
-        showUpOffset = Number.parseInt(showUpOffsetStr, 10)
-        if (isNaN(showUpOffset)) showUpOffset = 15
+        const parsedOffset = Number.parseInt(showUpOffsetStr, 10)
+        if (!isNaN(parsedOffset)) {
+          showUpOffset = parsedOffset
+        }
       } catch (e) {
         console.warn("Could not parse show-up time offset:", showUpOffsetStr)
-        showUpOffset = 15
       }
     }
     console.log(`Show-up time offset: ${showUpOffset} minutes`)
