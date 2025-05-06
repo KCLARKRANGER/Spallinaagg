@@ -34,7 +34,7 @@ export function parseTimeFromDateString(dateString: string): string {
 }
 
 // Helper function to calculate start time based on load time and offset in minutes
-export function calculateStartTime(loadTime: string, offsetMinutes = 0): string {
+export function calculateStartTime(loadTime: string, offsetMinutes: number): string {
   if (!loadTime) return "" // Return empty string instead of "N/A"
 
   try {
@@ -82,16 +82,19 @@ export function calculateStartTime(loadTime: string, offsetMinutes = 0): string 
   }
 }
 
-// Add minutes to a time string
+// Update the addMinutesToTimeString function to be more robust
 export function addMinutesToTimeString(timeStr: string, minutesToAdd: number): string {
   if (!timeStr) return ""
 
   console.log(`Adding ${minutesToAdd} minutes to time ${timeStr}`)
 
   try {
+    // First, ensure the time is in 24-hour format
+    const formattedTime = convertTo24HourFormat(timeStr)
+
     // Handle direct HH:MM format for better performance
-    if (/^\d{1,2}:\d{2}$/.test(timeStr)) {
-      const [hoursStr, minutesStr] = timeStr.split(":")
+    if (/^\d{1,2}:\d{2}$/.test(formattedTime)) {
+      const [hoursStr, minutesStr] = formattedTime.split(":")
       let hours = Number.parseInt(hoursStr, 10)
       let minutes = Number.parseInt(minutesStr, 10)
 
@@ -113,12 +116,12 @@ export function addMinutesToTimeString(timeStr: string, minutesToAdd: number): s
       hours = ((hours % 24) + 24) % 24
 
       const result = `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
-      console.log(`Result: ${result}`)
+      console.log(`Result: ${result} (${minutesToAdd} minutes added to ${formattedTime})`)
       return result
     }
 
     // For other formats, use the date object approach
-    const date = parseTimeString(timeStr)
+    const date = parseTimeString(formattedTime)
     if (!date) return timeStr
 
     // Add minutes
@@ -126,7 +129,7 @@ export function addMinutesToTimeString(timeStr: string, minutesToAdd: number): s
 
     // Format back to time string
     const result = `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`
-    console.log(`Result: ${result}`)
+    console.log(`Result: ${result} (${minutesToAdd} minutes added to ${formattedTime})`)
     return result
   } catch (e) {
     console.error("Error adding minutes to time:", e)
@@ -256,6 +259,9 @@ export function getPrintTruckTypeColor(type: string): string {
     "#e0e7ff", // indigo-100
     "#ccfbf1", // teal-100
     "#cffafe", // cyan-100
+    "#ecfccb", // lime-100
+    "#fef3c7", // amber-100
+    "#d1fae5", // emeral  // cyan-100
     "#ecfccb", // lime-100
     "#fef3c7", // amber-100
     "#d1fae5", // emerald-100

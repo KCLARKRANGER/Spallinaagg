@@ -21,7 +21,14 @@ export function EditableRow({ entry, onSave, onCancel }: EditableRowProps) {
 
   // Calculate initial time offset when component mounts
   useEffect(() => {
-    if (entry.startTime && entry.loadTime) {
+    // If the entry has a specific showUpOffset, use that value
+    if (entry.showUpOffset) {
+      const offsetValue = Number(entry.showUpOffset)
+      console.log(`EditableRow: Using entry's showUpOffset: ${offsetValue} minutes for ${entry.jobName}`)
+      setTimeOffset(offsetValue)
+    }
+    // Otherwise, try to calculate it from start and load times
+    else if (entry.startTime && entry.loadTime) {
       const startTimeDate = parseTimeString(entry.startTime)
       const loadTimeDate = parseTimeString(entry.loadTime)
 
@@ -29,13 +36,16 @@ export function EditableRow({ entry, onSave, onCancel }: EditableRowProps) {
         // Calculate difference in minutes
         const diffMs = loadTimeDate.getTime() - startTimeDate.getTime()
         const diffMinutes = Math.round(diffMs / 60000)
-        setTimeOffset(diffMinutes)
+        console.log(`EditableRow: Calculated offset from times: ${diffMinutes} minutes for ${entry.jobName}`)
+        setTimeOffset(diffMinutes > 0 ? diffMinutes : 15)
       }
-    } else if (entry.showUpOffset) {
-      // Use the show-up offset if available
-      setTimeOffset(Number(entry.showUpOffset))
     }
-  }, [entry.startTime, entry.loadTime, entry.showUpOffset])
+    // Default to 15 minutes if no other information is available
+    else {
+      console.log(`EditableRow: No offset information available, using default: 15 minutes for ${entry.jobName}`)
+      setTimeOffset(15)
+    }
+  }, [entry.startTime, entry.loadTime, entry.showUpOffset, entry.jobName])
 
   const handleInputChange = (field: keyof ScheduleEntry, value: string) => {
     setEditedEntry((prev) => ({ ...prev, [field]: value }))

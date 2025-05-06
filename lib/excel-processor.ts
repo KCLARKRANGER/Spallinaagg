@@ -253,19 +253,32 @@ export function processScheduleData(data: any[]): ScheduleData {
       ""
     ).toString()
 
+    // IMPORTANT: Log the raw value to debug
+    console.log(`Raw show-up offset value from CSV: "${showUpOffsetStr}"`)
+
     // Default to 15 minutes ONLY if no value is provided
     let showUpOffset = 15
     if (showUpOffsetStr && showUpOffsetStr.trim() !== "") {
       try {
-        const parsedOffset = Number.parseInt(showUpOffsetStr, 10)
+        const parsedOffset = Number.parseInt(showUpOffsetStr.trim(), 10)
         if (!isNaN(parsedOffset)) {
           showUpOffset = parsedOffset
+          console.log(`Found custom show-up offset: ${showUpOffset} minutes`)
+        } else {
+          console.warn(`Could not parse show-up time offset (NaN): "${showUpOffsetStr}"`)
         }
       } catch (e) {
-        console.warn("Could not parse show-up time offset:", showUpOffsetStr)
+        console.warn(`Could not parse show-up time offset (exception): "${showUpOffsetStr}"`, e)
       }
+    } else {
+      console.log(`No show-up offset found, using default: ${showUpOffset} minutes`)
     }
-    console.log(`Show-up time offset: ${showUpOffset} minutes`)
+    console.log(`Final show-up time offset: ${showUpOffset} minutes`)
+
+    // Add additional logging for ASPHALT entries
+    if (truckType === "ASPHALT" || truckType === "Asphalt") {
+      console.log(`ASPHALT ENTRY: ${jobName} - Using offset: ${showUpOffset} minutes`)
+    }
 
     // Get assigned drivers
     const driversAssigned = (firstRow["Drivers Assigned (labels)"] || "").toString()
@@ -307,6 +320,7 @@ export function processScheduleData(data: any[]): ScheduleData {
         // Calculate show-up time based on the staggered time
         let driverShowUpTime = ""
         if (staggeredTime) {
+          // Ensure we're using the correct offset from the CSV
           driverShowUpTime = addMinutesToTimeString(staggeredTime, -showUpOffset)
           console.log(
             `Driver ${driver}: Show-up time = ${driverShowUpTime} (${showUpOffset} minutes before ${staggeredTime})`,
@@ -358,6 +372,7 @@ export function processScheduleData(data: any[]): ScheduleData {
         // Calculate show-up time based on the staggered time
         let truckShowUpTime = ""
         if (staggeredTime) {
+          // Ensure we're using the correct offset from the CSV
           truckShowUpTime = addMinutesToTimeString(staggeredTime, -showUpOffset)
           console.log(
             `Truck ${i + 1}: Show-up time = ${truckShowUpTime} (${showUpOffset} minutes before ${staggeredTime})`,
@@ -397,6 +412,7 @@ export function processScheduleData(data: any[]): ScheduleData {
       // Calculate show-up time based on offset
       let singleShowUpTime = ""
       if (formattedBaseTime) {
+        // Ensure we're using the correct offset from the CSV
         singleShowUpTime = addMinutesToTimeString(formattedBaseTime, -showUpOffset)
         console.log(`Show-up time = ${singleShowUpTime} (${showUpOffset} minutes before ${formattedBaseTime})`)
       }

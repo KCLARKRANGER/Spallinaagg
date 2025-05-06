@@ -111,7 +111,7 @@ function getPrintTruckTypeColor(type: string): string {
 }
 
 // Helper function to calculate start time based on load time and offset in minutes
-function calculateStartTime(loadTime: string, offsetMinutes = 15): string {
+function calculateStartTime(loadTime: string, offsetMinutes: number): string {
   if (!loadTime) return "N/A"
 
   try {
@@ -141,7 +141,7 @@ function calculateStartTime(loadTime: string, offsetMinutes = 15): string {
       return "N/A"
     }
 
-    // Subtract the offset minutes
+    // Subtract the specified offset minutes
     minutes -= offsetMinutes
     while (minutes < 0) {
       minutes += 60
@@ -521,17 +521,41 @@ function TruckTypeSection({
                 }
               }
 
-              // Calculate show-up time if not available
+              // Get the show-up time, ensuring we use the correct offset
               let showUpTime = entry.showUpTime || ""
 
-              // If show-up time is still not available but we have a load time, calculate it
+              // If show-up time is not available but we have a load time, calculate it
+              // using the specific offset for this entry
               if (!showUpTime && displayTime) {
-                const offset = Number(entry.showUpOffset || "15")
-                showUpTime = addMinutesToTimeString(convertTo24HourFormat(displayTime), -offset)
+                // Get the specific offset for this entry, defaulting to 15 if not specified
+                const offset = entry.showUpOffset ? Number.parseInt(entry.showUpOffset, 10) : 15
+
+                // Log for debugging, especially for ASPHALT entries
+                if (entry.truckType === "ASPHALT" || entry.truckType === "Asphalt") {
+                  console.log(
+                    `ASPHALT ENTRY: ${entry.jobName} - Using offset: ${offset} minutes for show-up time calculation`,
+                  )
+                }
+
+                // Convert display time to 24-hour format first
+                const formattedTime = convertTo24HourFormat(displayTime)
+                if (formattedTime && formattedTime !== displayTime) {
+                  showUpTime = addMinutesToTimeString(formattedTime, -offset)
+                  console.log(
+                    `Entry ${entry.jobName} (${entry.truckDriver}): Calculated show-up time = ${showUpTime} (${offset} minutes before ${formattedTime})`,
+                  )
+                } else {
+                  showUpTime = "N/A"
+                }
               }
 
               // If still no show-up time, display N/A
               if (!showUpTime) showUpTime = "N/A"
+
+              // Log the calculated times for debugging
+              console.log(
+                `Entry ${entry.jobName} (${entry.truckDriver}): Load=${displayTime}, ShowUp=${showUpTime}, Offset=${entry.showUpOffset || "none"}`,
+              )
 
               if (isEditing) {
                 return (
@@ -775,19 +799,6 @@ function EditableRow({ entry, index, type, onCancel, onSave }: EditableRowProps)
         <Input
           value={editedEntry.materials}
           onChange={(e) => handleChange("materials", e.target.value)}
-          className="h-8"
-        />
-      </td>
-      <td className="p-2 border">
-        <Input value={editedEntry.pit} onChange={(e) => handleChange("pit", e.target.value)} className="h-8" />
-      </td>
-      <td className="p-2 border">
-        <Input value={editedEntry.qty} onChange={(e) => handleChange("qty", e.target.value)} className="h-8" />
-      </td>
-      <td className="p-2 border">
-        <Input
-          value={editedEntry.numTrucks || "1"}
-          onChange={(e) => handleChange("numTrucks", e.target.value)}
           className="h-8"
         />
       </td>
@@ -1061,7 +1072,7 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
         // Skip if we couldn't determine a driver name
         if (!driverName || driverName === "TBD" || driverName === "No Driver" || driverName === "Not Assigned") return
 
-        // Use the show-up time if available, otherwise use the load time
+        // Use the show-up time if available, otherwise calculate it from load time using the specific offset
         let showUpTime = entry.showUpTime || ""
         if (!showUpTime) {
           // Extract time from date if time is not available
@@ -1072,11 +1083,20 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
               displayTime = dateTimeMatch[1]
             }
           }
-          showUpTime = displayTime
+
+          if (displayTime) {
+            // Use the specific offset for this entry
+            const offset = entry.showUpOffset ? Number.parseInt(entry.showUpOffset, 10) : 0
+            const formattedTime = convertTo24HourFormat(displayTime)
+            if (formattedTime && formattedTime !== displayTime) {
+              showUpTime = addMinutesToTimeString(formattedTime, -offset)
+            }
+          }
         }
 
         // Convert to 24-hour format for comparison
         const formattedTime = convertTo24HourFormat(showUpTime)
+        if (!formattedTime) return // Skip if we couldn't format the time
 
         // Update the driver's earliest time if this is earlier or if we don't have a time yet
         if (!driverTimesMap[driverName] || formattedTime < driverTimesMap[driverName].time) {
@@ -1612,80 +1632,71 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
   // Format the report date for display
   const formattedReportDate = format(reportDate, "MMMM d, yyyy")
 
-  // Add this function to handle driver time updates
   const handleDriverTimeChange = useCallback(
     (driverName: string, truckNumber: string, newTime: string) => {
       // Create a deep copy of the data
       const newData = JSON.parse(JSON.stringify(data)) as ScheduleData
 
       // Find all entries with this truck number
-      let earliestEntry: ScheduleEntry | null = null
-      let earliestEntryType = ""
-      let earliestEntryIndex = -1
-      let earliestTime = "23:59"
+      const entriesWithTruck: { entry: ScheduleEntry; type: string; index: number }[] = []
 
-      // Find the earliest entry for this truck
+      // Find all entries for this truck
       Object.entries(newData.byTruckType).forEach(([type, entries]) => {
         entries.forEach((entry, index) => {
           if (entry.truckDriver === truckNumber) {
-            // Extract time from date if time is not available
-            let displayTime = entry.time
-            if (!displayTime && entry.date) {
-              const dateTimeMatch = entry.date.match(/(\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?)/i)
-              if (dateTimeMatch) {
-                displayTime = dateTimeMatch[1]
-              }
-            }
-
-            // Convert to 24-hour format for comparison
-            const formattedTime = convertTo24HourFormat(displayTime || "")
-
-            if (formattedTime < earliestTime) {
-              earliestTime = formattedTime
-              earliestEntry = entry
-              earliestEntryType = type
-              earliestEntryIndex = index
-            }
+            entriesWithTruck.push({ entry, type, index })
           }
         })
       })
 
-      // If we found the earliest entry, update its time
-      if (earliestEntry && earliestEntryType) {
-        // Get the show-up offset from the entry or use default
-        const showUpOffset = Number(earliestEntry.showUpOffset || "15")
-
-        // Calculate a new load time based on the show-up time and offset
-        const newLoadTime = addMinutesToTimeString(newTime, showUpOffset)
-
-        console.log(`Updating time for ${driverName} (${truckNumber}):`)
-        console.log(`  New show-up time: ${newTime}`)
-        console.log(`  Offset: ${showUpOffset} minutes`)
-        console.log(`  New load time: ${newLoadTime}`)
-
-        // Update the entry's times
-        newData.byTruckType[earliestEntryType][earliestEntryIndex].showUpTime = newTime
-        newData.byTruckType[earliestEntryType][earliestEntryIndex].time = newLoadTime
-
-        // Also update in allEntries
-        const allEntriesIndex = newData.allEntries.findIndex(
-          (entry) => entry.jobName === earliestEntry?.jobName && entry.truckDriver === truckNumber,
-        )
-
-        if (allEntriesIndex !== -1) {
-          newData.allEntries[allEntriesIndex].showUpTime = newTime
-          newData.allEntries[allEntriesIndex].time = newLoadTime
-        }
-
-        // Update the state
-        setData(newData)
-
-        // Show a toast notification
-        toast({
-          title: "Time updated",
-          description: `Updated show-up time for ${driverName} (${truckNumber}) to ${newTime}`,
-        })
+      if (entriesWithTruck.length === 0) {
+        console.log(`No entries found for truck ${truckNumber}`)
+        return
       }
+
+      // Sort entries by time to find the earliest
+      entriesWithTruck.sort((a, b) => {
+        const timeA = convertTo24HourFormat(a.entry.time || "")
+        const timeB = convertTo24HourFormat(b.entry.time || "")
+        return timeA.localeCompare(timeB)
+      })
+
+      // Get the earliest entry
+      const { entry: earliestEntry, type: earliestEntryType, index: earliestEntryIndex } = entriesWithTruck[0]
+
+      // Get the show-up offset from the entry, with no default
+      const showUpOffset = earliestEntry.showUpOffset ? Number.parseInt(earliestEntry.showUpOffset, 10) : 0
+
+      // Calculate a new load time based on the show-up time and offset
+      const newLoadTime = addMinutesToTimeString(newTime, showUpOffset)
+
+      console.log(`Updating time for ${driverName} (${truckNumber}):`)
+      console.log(`  New show-up time: ${newTime}`)
+      console.log(`  Offset: ${showUpOffset} minutes`)
+      console.log(`  New load time: ${newLoadTime}`)
+
+      // Update the entry's times
+      newData.byTruckType[earliestEntryType][earliestEntryIndex].showUpTime = newTime
+      newData.byTruckType[earliestEntryType][earliestEntryIndex].time = newLoadTime
+
+      // Also update in allEntries
+      const allEntriesIndex = newData.allEntries.findIndex(
+        (entry) => entry.jobName === earliestEntry?.jobName && entry.truckDriver === truckNumber,
+      )
+
+      if (allEntriesIndex !== -1) {
+        newData.allEntries[allEntriesIndex].showUpTime = newTime
+        newData.allEntries[allEntriesIndex].time = newLoadTime
+      }
+
+      // Update the state
+      setData(newData)
+
+      // Show a toast notification
+      toast({
+        title: "Time updated",
+        description: `Updated show-up time for ${driverName} (${truckNumber}) to ${newTime}`,
+      })
     },
     [data, toast],
   )
