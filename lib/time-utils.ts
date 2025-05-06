@@ -248,6 +248,7 @@ export function getPrintTruckTypeColor(type: string): string {
     "Dump Truck": "#ffedd5", // orange-100
     Slinger: "#fef9c3", // yellow-100
     Asphalt: "#dbeafe", // blue-100
+    ASPHALT: "#fbcfe8", // pink-100
     "Standard Mixer": "#dbeafe", // blue-100
     Conveyor: "#f3e8ff", // purple-100
   }
@@ -259,9 +260,6 @@ export function getPrintTruckTypeColor(type: string): string {
     "#e0e7ff", // indigo-100
     "#ccfbf1", // teal-100
     "#cffafe", // cyan-100
-    "#ecfccb", // lime-100
-    "#fef3c7", // amber-100
-    "#d1fae5", // emeral  // cyan-100
     "#ecfccb", // lime-100
     "#fef3c7", // amber-100
     "#d1fae5", // emerald-100

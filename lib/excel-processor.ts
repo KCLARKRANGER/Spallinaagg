@@ -89,6 +89,39 @@ function parseDateFromMondayFormat(dateString: string): string {
   return ""
 }
 
+// Helper function to find a value in a row using multiple possible column names
+function findValueInRow(row: any, possibleColumnNames: string[]): string {
+  // First, try exact matches
+  for (const columnName of possibleColumnNames) {
+    if (row[columnName] !== undefined) {
+      return row[columnName].toString()
+    }
+  }
+
+  // If no exact match, try case-insensitive matching
+  const rowKeys = Object.keys(row)
+  for (const columnName of possibleColumnNames) {
+    const lowerColumnName = columnName.toLowerCase()
+    for (const key of rowKeys) {
+      if (key.toLowerCase() === lowerColumnName) {
+        return row[key].toString()
+      }
+    }
+  }
+
+  // If still no match, try partial matching (for column names that might be abbreviated or truncated)
+  for (const columnName of possibleColumnNames) {
+    const lowerColumnName = columnName.toLowerCase()
+    for (const key of rowKeys) {
+      if (key.toLowerCase().includes(lowerColumnName) || lowerColumnName.includes(key.toLowerCase())) {
+        return row[key].toString()
+      }
+    }
+  }
+
+  return ""
+}
+
 export function processScheduleData(data: any[]): ScheduleData {
   const allEntries: ScheduleEntry[] = []
   const byTruckType: Record<TruckType, ScheduleEntry[]> = {}
@@ -112,18 +145,24 @@ export function processScheduleData(data: any[]): ScheduleData {
     // Get common data from the first row
     const firstRow = jobRows[0]
 
+    // Log all column names in the first row for debugging
+    console.log("Available columns in CSV:", Object.keys(firstRow))
+
     // Get truck type (default to "Dump Truck" if not specified)
-    const truckType = (firstRow["Truck Type (drop down)"] || "").toString().trim() || "Dump Truck"
+    const truckType = (findValueInRow(firstRow, ["Truck Type (drop down)", "Truck Type"]) || "").trim() || "Dump Truck"
     console.log(`Truck type: ${truckType}`)
 
+    // Check if this is an ASPHALT entry
+    const isAsphaltEntry = truckType.toUpperCase().includes("ASPHALT")
+    console.log(`Is ASPHALT entry: ${isAsphaltEntry}`)
+
     // Get pit location
-    const pit = (firstRow["Pit Location (labels)"] || firstRow["Pit Location (drop down)"] || "")
-      .toString()
+    const pit = (findValueInRow(firstRow, ["Pit Location (labels)", "Pit Location (drop down)", "Pit Location"]) || "")
       .replace(/^\[|\]$/g, "")
       .trim()
 
     // Get shift information and normalize it
-    const shift = (firstRow["1st/2nd (labels)"] || "").toString()
+    const shift = findValueInRow(firstRow, ["1st/2nd (labels)", "1st/2nd", "Shift"]) || ""
     let normalizedShift = shift
     if (shift) {
       const lowerShift = shift.toLowerCase()
@@ -139,24 +178,20 @@ export function processScheduleData(data: any[]): ScheduleData {
     }
 
     // Get location, quantity, materials, and notes
-    const location = (
-      firstRow["LOCATION (short text)"] ||
-      firstRow["I"] ||
-      firstRow["LOCATION (location)"] ||
-      firstRow["Location"] ||
-      ""
-    ).toString()
+    const location = findValueInRow(firstRow, ["LOCATION (short text)", "I", "LOCATION (location)", "Location"]) || ""
 
-    const qty = (firstRow["QTY REQ'D (short text)"] || "").toString()
+    const qty = findValueInRow(firstRow, ["QTY REQ'D (short text)", "QTY REQ'D", "Quantity"]) || ""
 
-    const materials = (
-      firstRow["Material Type (short text)"] ||
-      firstRow["Material Type (drop down)"] ||
-      firstRow["AGG. Materials (drop down)"] ||
-      ""
-    ).toString()
+    const materials =
+      findValueInRow(firstRow, [
+        "Material Type (short text)",
+        "Material Type (drop down)",
+        "Material Type",
+        "AGG. Materials (drop down)",
+        "AGG. Materials",
+      ]) || ""
 
-    const notes = (firstRow["Additional Delivery Notes (text)"] || "").toString()
+    const notes = findValueInRow(firstRow, ["Additional Delivery Notes (text)", "Notes", "Delivery Notes"]) || ""
 
     // Parse the due date and extract time
     let date = ""
@@ -205,13 +240,8 @@ export function processScheduleData(data: any[]): ScheduleData {
     console.log(`Formatted base time: ${formattedBaseTime}`)
 
     // Get the number of trucks required
-    const numTrucksStr = (
-      firstRow["Number of Trucks (number)"] ||
-      firstRow["L"] ||
-      firstRow["Number of Trucks"] ||
-      firstRow["# of Trucks"] ||
-      "1"
-    ).toString()
+    const numTrucksStr =
+      findValueInRow(firstRow, ["Number of Trucks (number)", "L", "Number of Trucks", "# of Trucks"]) || "1"
 
     let numTrucks = 1
     try {
@@ -226,12 +256,13 @@ export function processScheduleData(data: any[]): ScheduleData {
     console.log(`Number of trucks: ${numTrucks}`)
 
     // Get the interval between trucks
-    const intervalStr = (
-      firstRow["Interval Between Trucks (number)"] ||
-      firstRow["Interval Between Trucks (minutes)"] ||
-      firstRow["M"] ||
-      "0"
-    ).toString()
+    const intervalStr =
+      findValueInRow(firstRow, [
+        "Interval Between Trucks (number)",
+        "Interval Between Trucks (minutes)",
+        "Interval Between Trucks",
+        "M",
+      ]) || "0"
 
     let interval = 0
     try {
@@ -245,43 +276,96 @@ export function processScheduleData(data: any[]): ScheduleData {
 
     // Get the show-up time offset - CRITICAL FIX HERE
     // Check all possible column names for the show-up offset
-    const showUpOffsetStr = (
-      firstRow["Minutes Before Shift (SHOWUPTIME) (number)"] ||
-      firstRow["Minutes Before Shift"] ||
-      firstRow["Show-up Time Offset (minutes)"] ||
-      firstRow["N"] ||
-      ""
-    ).toString()
+    // First, log all column names to help debug
+    console.log("Looking for show-up offset in columns:", Object.keys(firstRow))
 
-    // IMPORTANT: Log the raw value to debug
-    console.log(`Raw show-up offset value from CSV: "${showUpOffsetStr}"`)
+    // CRITICAL FIX: For ASPHALT entries, we need to directly access the "Minutes Before Shift (SHOWUPTIME) (number)" column
+    let showUpOffset = 15 // Default value
 
-    // Default to 15 minutes ONLY if no value is provided
-    let showUpOffset = 15
-    if (showUpOffsetStr && showUpOffsetStr.trim() !== "") {
-      try {
-        const parsedOffset = Number.parseInt(showUpOffsetStr.trim(), 10)
-        if (!isNaN(parsedOffset)) {
-          showUpOffset = parsedOffset
-          console.log(`Found custom show-up offset: ${showUpOffset} minutes`)
-        } else {
-          console.warn(`Could not parse show-up time offset (NaN): "${showUpOffsetStr}"`)
+    if (isAsphaltEntry) {
+      // For ASPHALT entries, try these specific columns in order
+      const asphaltOffsetColumns = [
+        "Minutes Before Shift (SHOWUPTIME) (number)",
+        "Minutes Before Shift (SHOWUPTIME)",
+        "Minutes Before Shift",
+      ]
+
+      // Try each column name directly
+      for (const colName of asphaltOffsetColumns) {
+        if (firstRow[colName] !== undefined) {
+          const rawValue = firstRow[colName]
+          console.log(`ASPHALT: Found offset in column "${colName}": "${rawValue}" (type: ${typeof rawValue})`)
+
+          try {
+            // Parse the value, handling both number and string types
+            const parsedValue = typeof rawValue === "number" ? rawValue : Number.parseFloat(String(rawValue).trim())
+            if (!isNaN(parsedValue)) {
+              showUpOffset = Math.round(parsedValue)
+              console.log(`ASPHALT: Successfully parsed offset: ${showUpOffset} minutes from column "${colName}"`)
+              break // Exit the loop once we've found a valid value
+            }
+          } catch (e) {
+            console.warn(`ASPHALT: Error parsing offset from column "${colName}":`, e)
+          }
         }
-      } catch (e) {
-        console.warn(`Could not parse show-up time offset (exception): "${showUpOffsetStr}"`, e)
       }
+
+      // If we still don't have a value, try column N directly
+      if (showUpOffset === 15 && firstRow["N"] !== undefined) {
+        const nValue = firstRow["N"]
+        console.log(`ASPHALT: Trying column N directly: "${nValue}" (type: ${typeof nValue})`)
+
+        try {
+          const parsedN = typeof nValue === "number" ? nValue : Number.parseFloat(String(nValue).trim())
+          if (!isNaN(parsedN)) {
+            showUpOffset = Math.round(parsedN)
+            console.log(`ASPHALT: Successfully parsed offset from column N: ${showUpOffset} minutes`)
+          }
+        } catch (e) {
+          console.warn("ASPHALT: Error parsing column N:", e)
+        }
+      }
+
+      console.log(`ASPHALT ENTRY: ${jobName} - Final offset value: ${showUpOffset} minutes`)
     } else {
-      console.log(`No show-up offset found, using default: ${showUpOffset} minutes`)
+      // For non-ASPHALT entries, use the standard approach
+      const showUpOffsetStr = findValueInRow(firstRow, [
+        "Minutes Before Shift (SHOWUPTIME) (number)",
+        "Minutes Before Shift (SHOWUPTIME)",
+        "Minutes Before Shift",
+        "SHOWUPTIME",
+        "Show-up Time Offset (minutes)",
+        "Show-up Time Offset",
+        "N",
+      ])
+
+      console.log(`Raw show-up offset value from CSV: "${showUpOffsetStr}"`)
+
+      if (firstRow["N"] !== undefined) {
+        console.log(`Direct value from column N: "${firstRow["N"]}"`)
+      }
+
+      if (showUpOffsetStr && showUpOffsetStr.trim() !== "") {
+        try {
+          const parsedOffset = Number.parseFloat(showUpOffsetStr.trim())
+          if (!isNaN(parsedOffset)) {
+            showUpOffset = Math.round(parsedOffset)
+            console.log(`Found custom show-up offset: ${showUpOffset} minutes`)
+          } else {
+            console.warn(`Could not parse show-up time offset (NaN): "${showUpOffsetStr}"`)
+          }
+        } catch (e) {
+          console.warn(`Could not parse show-up time offset (exception): "${showUpOffsetStr}"`, e)
+        }
+      } else {
+        console.log(`No show-up offset found, using default: ${showUpOffset} minutes`)
+      }
     }
+
     console.log(`Final show-up time offset: ${showUpOffset} minutes`)
 
-    // Add additional logging for ASPHALT entries
-    if (truckType === "ASPHALT" || truckType === "Asphalt") {
-      console.log(`ASPHALT ENTRY: ${jobName} - Using offset: ${showUpOffset} minutes`)
-    }
-
     // Get assigned drivers
-    const driversAssigned = (firstRow["Drivers Assigned (labels)"] || "").toString()
+    const driversAssigned = findValueInRow(firstRow, ["Drivers Assigned (labels)", "Drivers Assigned"]) || ""
     let driversList: string[] = []
 
     if (driversAssigned) {
@@ -351,6 +435,13 @@ export function processScheduleData(data: any[]): ScheduleData {
           byTruckType[truckType] = []
         }
         byTruckType[truckType].push(entry)
+
+        // Add additional logging for ASPHALT entries
+        if (isAsphaltEntry) {
+          console.log(
+            `ASPHALT ENTRY CREATED: ${jobName} - Driver: ${driver}, ShowUpTime: ${driverShowUpTime}, Offset: ${showUpOffset} minutes`,
+          )
+        }
       })
     }
     // CASE 2: If we have multiple trucks required but no specific drivers
@@ -403,6 +494,13 @@ export function processScheduleData(data: any[]): ScheduleData {
           byTruckType[truckType] = []
         }
         byTruckType[truckType].push(entry)
+
+        // Add additional logging for ASPHALT entries
+        if (isAsphaltEntry) {
+          console.log(
+            `ASPHALT ENTRY CREATED: ${jobName} - Truck ${i + 1}, ShowUpTime: ${truckShowUpTime}, Offset: ${showUpOffset} minutes`,
+          )
+        }
       }
     }
     // CASE 3: Single entry (default case)
@@ -441,6 +539,13 @@ export function processScheduleData(data: any[]): ScheduleData {
         byTruckType[truckType] = []
       }
       byTruckType[truckType].push(entry)
+
+      // Add additional logging for ASPHALT entries
+      if (isAsphaltEntry) {
+        console.log(
+          `ASPHALT ENTRY CREATED: ${jobName} - Single entry, ShowUpTime: ${singleShowUpTime}, Offset: ${showUpOffset} minutes`,
+        )
+      }
     }
   })
 

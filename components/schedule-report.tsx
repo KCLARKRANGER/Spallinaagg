@@ -22,6 +22,7 @@ import { useRouter } from "next/navigation"
 // Add the import for the DriverTimeEditor component at the top of the file
 import { DriverTimeEditor } from "@/components/driver-time-editor"
 import { TimeAdjuster } from "@/components/time-adjuster"
+import { addMinutesToTimeString, convertTo24HourFormat } from "@/lib/time-utils"
 
 interface ScheduleReportProps {
   data: ScheduleData
@@ -39,6 +40,7 @@ const truckTypeColors: Record<string, string> = {
   Mixer: "bg-purple-100 dark:bg-purple-900", // Same as Standard Mixer
   Conveyor: "bg-teal-100 dark:bg-teal-900",
   Undefined: "bg-gray-100 dark:bg-gray-800", // Added for undefined truck type
+  ASPHALT: "bg-pink-100 dark:bg-pink-900", // Added for ASPHALT type
 }
 
 // Additional colors for dynamically discovered truck types
@@ -82,6 +84,7 @@ function getPrintTruckTypeColor(type: string): string {
     Mixer: "#f3e8ff", // Same as Standard Mixer
     Conveyor: "#ccfbf1", // teal-100
     Undefined: "#f3f4f6", // gray-100
+    ASPHALT: "#fbcfe8", // pink-100
   }
 
   // Additional print colors for dynamic truck types
@@ -108,124 +111,6 @@ function getPrintTruckTypeColor(type: string): string {
   colorMap[type] = additionalPrintColors[colorIndex]
 
   return colorMap[type]
-}
-
-// Helper function to calculate start time based on load time and offset in minutes
-function calculateStartTime(loadTime: string, offsetMinutes: number): string {
-  if (!loadTime) return "N/A"
-
-  try {
-    // Handle different time formats
-    let hours = 0
-    let minutes = 0
-
-    // Military time format (e.g., "0900")
-    if (/^\d{3,4}$/.test(loadTime)) {
-      const timeStr = loadTime.padStart(4, "0")
-      hours = Number.parseInt(timeStr.substring(0, 2), 10)
-      minutes = Number.parseInt(timeStr.substring(2, 4), 10)
-    }
-    // Standard time format (e.g., "9:00 AM")
-    else if (/^\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?$/i.test(loadTime)) {
-      const timeParts = loadTime.split(":")
-      hours = Number.parseInt(timeParts[0], 10)
-      minutes = Number.parseInt(timeParts[1].replace(/[^\d]/g, ""), 10)
-
-      // Handle AM/PM
-      if (/PM/i.test(loadTime) && hours < 12) {
-        hours += 12
-      } else if (/AM/i.test(loadTime) && hours === 12) {
-        hours = 0
-      }
-    } else {
-      return "N/A"
-    }
-
-    // Subtract the specified offset minutes
-    minutes -= offsetMinutes
-    while (minutes < 0) {
-      minutes += 60
-      hours -= 1
-    }
-    if (hours < 0) {
-      hours += 24
-    }
-
-    // Format the start time in 24-hour format
-    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
-  } catch (e) {
-    console.error("Error calculating start time:", e)
-    return "N/A"
-  }
-}
-
-// Helper function to calculate load time based on start time and offset in minutes
-function calculateLoadTime(startTime: string, offsetMinutes = 15): string {
-  if (!startTime) return "N/A"
-
-  try {
-    // Parse the start time
-    const [hoursStr, minutesStr] = startTime.split(":")
-    let hours = Number.parseInt(hoursStr, 10)
-    let minutes = Number.parseInt(minutesStr, 10)
-
-    // Add the offset minutes
-    minutes += offsetMinutes
-    while (minutes >= 60) {
-      minutes -= 60
-      hours += 1
-    }
-    hours = hours % 24
-
-    // Format the load time in 24-hour format
-    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
-  } catch (e) {
-    console.error("Error calculating load time:", e)
-    return "N/A"
-  }
-}
-
-// Add a function to convert time to 24-hour format
-function convertTo24HourFormat(timeStr: string): string {
-  if (!timeStr || timeStr === "N/A") return timeStr
-
-  try {
-    // Already in 24-hour format like "14:30"
-    if (/^\d{1,2}:\d{2}$/.test(timeStr) && !timeStr.includes("AM") && !timeStr.includes("PM")) {
-      const [hours, minutes] = timeStr.split(":").map((part) => Number.parseInt(part, 10))
-      return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
-    }
-
-    // Military time format (e.g., "0900")
-    if (/^\d{3,4}$/.test(timeStr)) {
-      const paddedTime = timeStr.padStart(4, "0")
-      const hours = Number.parseInt(paddedTime.substring(0, 2), 10)
-      const minutes = Number.parseInt(paddedTime.substring(2, 4), 10)
-      return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
-    }
-
-    // Standard time format with AM/PM (e.g., "9:00 AM")
-    if (/^\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?$/i.test(timeStr)) {
-      const timeParts = timeStr.split(":")
-      let hours = Number.parseInt(timeParts[0], 10)
-      const minutesPart = timeParts[1].replace(/[^\d]/g, "")
-      const minutes = Number.parseInt(minutesPart, 10)
-
-      // Handle AM/PM
-      if (/PM/i.test(timeStr) && hours < 12) {
-        hours += 12
-      } else if (/AM/i.test(timeStr) && hours === 12) {
-        hours = 0
-      }
-
-      return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
-    }
-
-    return timeStr
-  } catch (e) {
-    console.error("Error converting time format:", e)
-    return timeStr
-  }
 }
 
 // Create a blank entry template
@@ -454,7 +339,7 @@ function TruckTypeSection({
   console.log(`TruckTypeSection: ${type} with ${completeEntries.length} entries`)
   completeEntries.forEach((entry, idx) => {
     console.log(
-      `Entry ${idx}: Job=${entry.jobName}, Time=${entry.time}, ShowUpTime=${entry.showUpTime}, Interval=${entry.interval}`,
+      `Entry ${idx}: Job=${entry.jobName}, Time=${entry.time}, ShowUpTime=${entry.showUpTime}, Interval=${entry.interval}, Offset=${entry.showUpOffset || "15 (default)"}`,
     )
   })
 
@@ -472,7 +357,9 @@ function TruckTypeSection({
     if (jobEntries.length > 1) {
       console.log(`Job ${jobName} has ${jobEntries.length} entries:`)
       jobEntries.forEach((entry, idx) => {
-        console.log(`  Entry ${idx}: Time=${entry.time}, ShowUpTime=${entry.showUpTime}`)
+        console.log(
+          `  Entry ${idx}: Time=${entry.time}, ShowUpTime=${entry.showUpTime}, Offset=${entry.showUpOffset || "15 (default)"}`,
+        )
       })
     }
   })
@@ -530,19 +417,27 @@ function TruckTypeSection({
                 // Get the specific offset for this entry, defaulting to 15 if not specified
                 const offset = entry.showUpOffset ? Number.parseInt(entry.showUpOffset, 10) : 15
 
+                // Check if this is an ASPHALT entry (case-insensitive check)
+                const normalizedTruckType = entry.truckType.toUpperCase().trim().replace(/\s+/g, " ")
+                const isAsphaltEntry =
+                  normalizedTruckType === "ASPHALT" ||
+                  normalizedTruckType === "ASPHALT TRUCK" ||
+                  normalizedTruckType.includes("ASPHALT")
+                console.log(
+                  `ASPHALT CHECK in UI - Entry: ${entry.jobName}, Type: "${entry.truckType}", Normalized: "${normalizedTruckType}", Is ASPHALT? ${isAsphaltEntry}`,
+                )
+
                 // Log for debugging, especially for ASPHALT entries
-                if (entry.truckType === "ASPHALT" || entry.truckType === "Asphalt") {
-                  console.log(
-                    `ASPHALT ENTRY: ${entry.jobName} - Using offset: ${offset} minutes for show-up time calculation`,
-                  )
-                }
+                console.log(
+                  `Entry ${entry.jobName} (${entry.truckDriver}): Using offset: ${offset} minutes (from CSV: ${entry.showUpOffset || "not specified"})${isAsphaltEntry ? " - ASPHALT ENTRY" : ""}`,
+                )
 
                 // Convert display time to 24-hour format first
                 const formattedTime = convertTo24HourFormat(displayTime)
                 if (formattedTime && formattedTime !== displayTime) {
                   showUpTime = addMinutesToTimeString(formattedTime, -offset)
                   console.log(
-                    `Entry ${entry.jobName} (${entry.truckDriver}): Calculated show-up time = ${showUpTime} (${offset} minutes before ${formattedTime})`,
+                    `Entry ${entry.jobName} (${entry.truckDriver}): Calculated show-up time = ${showUpTime} (${offset} minutes before ${formattedTime})${isAsphaltEntry ? " - ASPHALT ENTRY" : ""}`,
                   )
                 } else {
                   showUpTime = "N/A"
@@ -554,7 +449,7 @@ function TruckTypeSection({
 
               // Log the calculated times for debugging
               console.log(
-                `Entry ${entry.jobName} (${entry.truckDriver}): Load=${displayTime}, ShowUp=${showUpTime}, Offset=${entry.showUpOffset || "none"}`,
+                `Entry ${entry.jobName} (${entry.truckDriver}): Load=${displayTime}, ShowUp=${showUpTime}, Offset=${entry.showUpOffset || "15 (default)"}`,
               )
 
               if (isEditing) {
@@ -803,6 +698,21 @@ function EditableRow({ entry, index, type, onCancel, onSave }: EditableRowProps)
         />
       </td>
       <td className="p-2 border">
+        <Input value={editedEntry.pit} onChange={(e) => handleChange("pit", e.target.value)} className="h-8" />
+      </td>
+      <td className="p-2 border">
+        <Input value={editedEntry.qty} onChange={(e) => handleChange("qty", e.target.value)} className="h-8" />
+      </td>
+      <td className="p-2 border">
+        <Input
+          value={editedEntry.numTrucks || "1"}
+          onChange={(e) => handleChange("numTrucks", e.target.value)}
+          className="h-8"
+          type="number"
+          min="1"
+        />
+      </td>
+      <td className="p-2 border">
         <Textarea
           value={editedEntry.notes}
           onChange={(e) => handleChange("notes", e.target.value)}
@@ -822,38 +732,6 @@ function EditableRow({ entry, index, type, onCancel, onSave }: EditableRowProps)
       </td>
     </tr>
   )
-}
-
-// Helper function to add minutes to a time string in HH:MM format
-function addMinutesToTimeString(time: string, minutesToAdd: number): string {
-  if (!time || !/^\d{1,2}:\d{2}$/.test(time)) {
-    return time // Return original if invalid format
-  }
-
-  try {
-    const [hoursStr, minutesStr] = time.split(":")
-    let hours = Number.parseInt(hoursStr, 10)
-    let minutes = Number.parseInt(minutesStr, 10)
-
-    minutes += minutesToAdd
-
-    while (minutes >= 60) {
-      minutes -= 60
-      hours += 1
-    }
-
-    while (minutes < 0) {
-      minutes += 60
-      hours -= 1
-    }
-
-    hours = (hours + 24) % 24 // Keep within 0-23 range
-
-    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
-  } catch (e) {
-    console.error("Error adding minutes to time:", e)
-    return time // Return original on error
-  }
 }
 
 export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
@@ -1085,11 +963,29 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
           }
 
           if (displayTime) {
-            // Use the specific offset for this entry
-            const offset = entry.showUpOffset ? Number.parseInt(entry.showUpOffset, 10) : 0
+            // Use the specific offset for this entry, defaulting to 15 if not specified
+            const offset = entry.showUpOffset ? Number.parseInt(entry.showUpOffset, 10) : 15
+
+            // Check if this is an ASPHALT entry (case-insensitive check)
+            const normalizedTruckType = entry.truckType.toUpperCase().trim().replace(/\s+/g, " ")
+            const isAsphaltEntry =
+              normalizedTruckType === "ASPHALT" ||
+              normalizedTruckType === "ASPHALT TRUCK" ||
+              normalizedTruckType.includes("ASPHALT")
+            console.log(
+              `ASPHALT CHECK in Driver Summary - Entry: ${entry.jobName}, Type: "${entry.truckType}", Normalized: "${normalizedTruckType}", Is ASPHALT? ${isAsphaltEntry}`,
+            )
+
+            console.log(
+              `Driver ${driverName}: Using offset from CSV: ${entry.showUpOffset || "not specified"} (${offset} minutes)${isAsphaltEntry ? " - ASPHALT ENTRY" : ""}`,
+            )
+
             const formattedTime = convertTo24HourFormat(displayTime)
             if (formattedTime && formattedTime !== displayTime) {
               showUpTime = addMinutesToTimeString(formattedTime, -offset)
+              console.log(
+                `Driver ${driverName}: Calculated show-up time = ${showUpTime} (${offset} minutes before ${formattedTime})${isAsphaltEntry ? " - ASPHALT ENTRY" : ""}`,
+              )
             }
           }
         }
@@ -1153,7 +1049,7 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
     if (button) {
       const originalContent = button.innerHTML
       button.innerHTML =
-        '<svg class="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Creating PDF...'
+        '<svg class="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Creating PDF...'
       button.disabled = true
 
       try {
@@ -1181,6 +1077,12 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
             // Ensure time is in a consistent format
             if (entry.time) {
               entry.time = convertTo24HourFormat(entry.time)
+            }
+
+            // Calculate show-up time if not already present
+            if (!entry.showUpTime && entry.time) {
+              const offset = entry.showUpOffset ? Number.parseInt(entry.showUpOffset, 10) : 15
+              entry.showUpTime = addMinutesToTimeString(convertTo24HourFormat(entry.time), -offset)
             }
           })
         })
@@ -1429,7 +1331,7 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
         // Calculate show-up time if not available
         let showUpTime = entry.showUpTime || ""
         if (!showUpTime && displayTime) {
-          const offset = Number(entry.showUpOffset || "15")
+          const offset = entry.showUpOffset ? Number.parseInt(entry.showUpOffset, 10) : 15
           showUpTime = addMinutesToTimeString(convertTo24HourFormat(displayTime), -offset)
         }
 
@@ -1664,15 +1566,15 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
       // Get the earliest entry
       const { entry: earliestEntry, type: earliestEntryType, index: earliestEntryIndex } = entriesWithTruck[0]
 
-      // Get the show-up offset from the entry, with no default
-      const showUpOffset = earliestEntry.showUpOffset ? Number.parseInt(earliestEntry.showUpOffset, 10) : 0
+      // Get the show-up offset from the entry, defaulting to 15 if not specified
+      const showUpOffset = earliestEntry.showUpOffset ? Number.parseInt(earliestEntry.showUpOffset, 10) : 15
 
       // Calculate a new load time based on the show-up time and offset
       const newLoadTime = addMinutesToTimeString(newTime, showUpOffset)
 
       console.log(`Updating time for ${driverName} (${truckNumber}):`)
       console.log(`  New show-up time: ${newTime}`)
-      console.log(`  Offset: ${showUpOffset} minutes`)
+      console.log(`  Offset from CSV: ${earliestEntry.showUpOffset || "not specified"} (${showUpOffset} minutes)`)
       console.log(`  New load time: ${newLoadTime}`)
 
       // Update the entry's times
