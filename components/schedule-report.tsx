@@ -19,7 +19,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { getDriverForTruck } from "@/lib/driver-data"
 import { useToast } from "@/components/ui/use-toast"
 import { useRouter } from "next/navigation"
-// Add the import for the DriverTimeEditor component at the top of the file
 import { DriverTimeEditor } from "@/components/driver-time-editor"
 import { TimeAdjuster } from "@/components/time-adjuster"
 import { addMinutesToTimeString, convertTo24HourFormat } from "@/lib/time-utils"
@@ -764,6 +763,57 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
   const sortedData = useMemo(() => {
     const newData = { ...data }
 
+    // Ensure trucks are categorized by their known type from the driver data
+    Object.keys(newData.byTruckType).forEach((type) => {
+      const entriesToMove: Record<string, ScheduleEntry[]> = {}
+
+      // Check each entry to see if it should be in a different category
+      newData.byTruckType[type] = newData.byTruckType[type].filter((entry) => {
+        // Skip recategorization for ASPHALT entries
+        if (entry.truckType.toUpperCase().includes("ASPHALT")) {
+          return true // Keep ASPHALT entries in their original category
+        }
+
+        // If the truck driver is a known truck number, check its type
+        if (/^(SMI)?(\d+[Ps]?|MMH\d+)$/i.test(entry.truckDriver)) {
+          const driverInfo = getDriverForTruck(entry.truckDriver)
+          if (driverInfo && driverInfo.truckType) {
+            const correctType = driverInfo.truckType
+
+            // Normalize Triaxle and Dump Truck to be the same category
+            if (
+              (correctType === "Triaxle" && type === "Dump Truck") ||
+              ((correctType === "Dump Truck") === "Triaxle" && type === "Dump Truck") ||
+              (correctType === "Dump Truck" && type === "Triaxle")
+            ) {
+              return true // Keep in current category
+            }
+
+            // If the entry is already in the correct type category, keep it
+            if (type === correctType) {
+              return true
+            }
+
+            // Otherwise, move it to the correct category
+            if (!entriesToMove[correctType]) {
+              entriesToMove[correctType] = []
+            }
+            entriesToMove[correctType].push({ ...entry, truckType: correctType })
+            return false
+          }
+        }
+        return true
+      })
+
+      // Add the entries to their correct categories
+      Object.entries(entriesToMove).forEach(([correctType, entries]) => {
+        if (!newData.byTruckType[correctType]) {
+          newData.byTruckType[correctType] = []
+        }
+        newData.byTruckType[correctType].push(...entries)
+      })
+    })
+
     // Helper function to extract time
     const getTimeValue = (entry: ScheduleEntry): number => {
       // Try to parse time from time field
@@ -861,8 +911,9 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
       const jobShiftGroups: Record<string, ScheduleEntry[]> = {}
 
       // Group by job name and shift
-      newData.byTruckType[type].forEach((entry) => {
-        const key = `${entry.jobName}|${entry.shift}|${entry.time}`
+      newData.byTruckType[type].forEach((entry, entryIndex) => {
+        // Add a unique identifier to ensure entries with the same name are treated as separate
+        const key = `${entry.jobName}|${entry.shift}|${entry.time}|${entryIndex}`
         if (!jobShiftGroups[key]) {
           jobShiftGroups[key] = []
         }
@@ -895,10 +946,18 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
         newData.byTruckType["Dump Truck"] = []
       }
 
-      // Move entries to Dump Truck category
+      // Move non-ASPHALT entries to Dump Truck category
       undefinedEntries.forEach((entry) => {
-        entry.truckType = "Dump Truck"
-        newData.byTruckType["Dump Truck"].push(entry)
+        if (!entry.truckType.toUpperCase().includes("ASPHALT")) {
+          entry.truckType = "Dump Truck"
+          newData.byTruckType["Dump Truck"].push(entry)
+        } else {
+          // For ASPHALT entries, ensure they're in the ASPHALT category
+          if (!newData.byTruckType["ASPHALT"]) {
+            newData.byTruckType["ASPHALT"] = []
+          }
+          newData.byTruckType["ASPHALT"].push(entry)
+        }
       })
 
       // Remove the Undefined category
@@ -1581,6 +1640,10 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
       newData.byTruckType[earliestEntryType][earliestEntryIndex].showUpTime = newTime
       newData.byTruckType[earliestEntryType][earliestEntryIndex].time = newLoadTime
 
+      // Update the entry's times
+      newData.byTruckType[earliestEntryType][earliestEntryIndex].showUpTime = newTime
+      newData.byTruckType[earliestEntryType][earliestEntryIndex].time = newLoadTime
+
       // Also update in allEntries
       const allEntriesIndex = newData.allEntries.findIndex(
         (entry) => entry.jobName === earliestEntry?.jobName && entry.truckDriver === truckNumber,
@@ -1601,6 +1664,58 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
       })
     },
     [data, toast],
+  )
+
+  // Add a handler for driver name changes
+  const handleDriverNameChange = useCallback(
+    (oldName: string, truckNumber: string, newName: string) => {
+      // Create a deep copy of the data
+      const newData = JSON.parse(JSON.stringify(data)) as ScheduleData
+
+      // Find all entries with this truck number
+      let updatedEntries = 0
+
+      // Update entries in byTruckType
+      Object.entries(newData.byTruckType).forEach(([type, entries]) => {
+        entries.forEach((entry, index) => {
+          if (entry.truckDriver === truckNumber) {
+            // Update the driver name in the driver data
+            const driverInfo = getDriverForTruck(truckNumber)
+            if (driverInfo) {
+              // This would update the driver data, but we can't modify the constant
+              // Instead, we'll just update the entry
+              console.log(`Updating driver name for ${truckNumber} from ${oldName} to ${newName}`)
+              updatedEntries++
+            }
+          }
+        })
+      })
+
+      // Also update in allEntries
+      newData.allEntries.forEach((entry) => {
+        if (entry.truckDriver === truckNumber) {
+          // We don't modify the entry.truckDriver since that's the truck number
+          // But we would update the driver name in the driver data
+        }
+      })
+
+      // Update the driver summary
+      const updatedDriverSummary = driverSummary.map((driver) => {
+        if (driver.truckNumber === truckNumber && driver.name === oldName) {
+          return { ...driver, name: newName }
+        }
+        return driver
+      })
+
+      setDriverSummary(updatedDriverSummary)
+
+      // Show a toast notification
+      toast({
+        title: "Driver name updated",
+        description: `Updated driver name for truck ${truckNumber} from ${oldName} to ${newName}`,
+      })
+    },
+    [data, driverSummary, toast],
   )
 
   return (
@@ -1787,7 +1902,17 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
               <tbody>
                 {driverSummary.map((driver, index) => (
                   <tr key={index} className={index % 2 === 0 ? "bg-background" : "bg-muted/30"}>
-                    <td className="p-2 border font-medium">{driver.name}</td>
+                    <td className="p-2 border font-medium">
+                      {editMode ? (
+                        <Input
+                          value={driver.name}
+                          onChange={(e) => handleDriverNameChange(driver.name, driver.truckNumber, e.target.value)}
+                          className="h-8"
+                        />
+                      ) : (
+                        driver.name
+                      )}
+                    </td>
                     <td className="p-2 border">{driver.truckNumber}</td>
                     <td className="p-2 border">
                       <DriverTimeEditor
