@@ -1,12 +1,11 @@
 "use client"
 
-import { useState, useEffect, useMemo, useCallback } from "react"
+import type React from "react"
+
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { ScheduleData, ScheduleEntry, TruckType } from "@/types/schedule"
-import { exportToPDF } from "@/lib/export-utils"
-import { Printer, Edit, Save, X, FileIcon as FilePdf, Trash2, Copy, Plus, AlertCircle } from "lucide-react"
+import { Edit, Save, X, Trash2, Copy, Plus } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { format, parse, isValid } from "date-fns"
 import { TruckDisplay } from "@/components/truck-display"
@@ -15,16 +14,17 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { TruckSelector } from "@/components/truck-selector"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { getDriverForTruck } from "@/lib/driver-data"
-import { useToast } from "@/components/ui/use-toast"
-import { useRouter } from "next/navigation"
-import { DriverTimeEditor } from "@/components/driver-time-editor"
 import { TimeAdjuster } from "@/components/time-adjuster"
 import { addMinutesToTimeString, convertTo24HourFormat } from "@/lib/time-utils"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useToast } from "@/components/ui/use-toast"
+import { DriverSummary } from "./driver-summary"
+// Add the import for the ExportButton component
+import { ExportButton } from "./export-button"
 
 interface ScheduleReportProps {
   data: ScheduleData
+  onUpdateData?: (updatedData: ScheduleData) => void
 }
 
 // Define truck type colors with a function to generate colors for new types
@@ -733,1266 +733,420 @@ function EditableRow({ entry, index, type, onCancel, onSave }: EditableRowProps)
   )
 }
 
-export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
+export function ScheduleReport({ data: initialData, onUpdateData }: ScheduleReportProps) {
   const [activeTab, setActiveTab] = useState<string>("all")
   const [data, setData] = useState<ScheduleData>(initialData)
   const [editMode, setEditMode] = useState(false)
   const [editingEntry, setEditingEntry] = useState<{ index: number; type: TruckType } | null>(null)
-  const [dispatcherNotes, setDispatcherNotes] = useState<string>("")
+  const [dispatcherNotes, setDispatcherNotes] = useState<string>(initialData.dispatcherNotes || "")
   const [isSaving, setIsSaving] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
-  const [driverSummary, setDriverSummary] = useState<Array<{ name: string; truckNumber: string; time: string }>>([])
-
   const { toast } = useToast()
-  const router = useRouter()
 
-  // Extract the report date from the data
-  const reportDate = useMemo(() => {
-    const extractedDate = extractReportDate(data)
-    console.log("Extracted report date:", extractedDate)
-    return extractedDate
-  }, [data])
-
-  // Update data when initialData changes (new file upload)
   useEffect(() => {
+    console.log("ScheduleReport: Data received:", initialData)
     setData(initialData)
+    setDispatcherNotes(initialData.dispatcherNotes || "")
   }, [initialData])
 
-  // Sort entries chronologically and trucks alphanumerically
-  // Sort entries by shift priority and then chronologically
-  const sortedData = useMemo(() => {
-    const newData = { ...data }
+  // Function to group entries by truck type
+  const groupEntriesByType = (entries: ScheduleEntry[]): Record<TruckType, ScheduleEntry[]> => {
+    const grouped: Record<TruckType, ScheduleEntry[]> = {} as Record<TruckType, ScheduleEntry[]>
 
-    // Ensure trucks are categorized by their known type from the driver data
-    Object.keys(newData.byTruckType).forEach((type) => {
-      const entriesToMove: Record<string, ScheduleEntry[]> = {}
+    if (!entries) return grouped
 
-      // Check each entry to see if it should be in a different category
-      newData.byTruckType[type] = newData.byTruckType[type].filter((entry) => {
-        // Skip recategorization for ASPHALT entries
-        if (entry.truckType.toUpperCase().includes("ASPHALT")) {
-          return true // Keep ASPHALT entries in their original category
-        }
-
-        // If the truck driver is a known truck number, check its type
-        if (/^(SMI)?(\d+[Ps]?|MMH\d+)$/i.test(entry.truckDriver)) {
-          const driverInfo = getDriverForTruck(entry.truckDriver)
-          if (driverInfo && driverInfo.truckType) {
-            const correctType = driverInfo.truckType
-
-            // Normalize Triaxle and Dump Truck to be the same category
-            if (
-              (correctType === "Triaxle" && type === "Dump Truck") ||
-              ((correctType === "Dump Truck") === "Triaxle" && type === "Dump Truck") ||
-              (correctType === "Dump Truck" && type === "Triaxle")
-            ) {
-              return true // Keep in current category
-            }
-
-            // If the entry is already in the correct type category, keep it
-            if (type === correctType) {
-              return true
-            }
-
-            // Otherwise, move it to the correct category
-            if (!entriesToMove[correctType]) {
-              entriesToMove[correctType] = []
-            }
-            entriesToMove[correctType].push({ ...entry, truckType: correctType })
-            return false
-          }
-        }
-        return true
-      })
-
-      // Add the entries to their correct categories
-      Object.entries(entriesToMove).forEach(([correctType, entries]) => {
-        if (!newData.byTruckType[correctType]) {
-          newData.byTruckType[correctType] = []
-        }
-        newData.byTruckType[correctType].push(...entries)
-      })
+    entries.forEach((entry) => {
+      if (!entry.truckType) {
+        entry.truckType = "Undefined" // Ensure every entry has a truckType
+      }
+      if (!grouped[entry.truckType]) {
+        grouped[entry.truckType] = []
+      }
+      grouped[entry.truckType].push(entry)
     })
 
-    // Helper function to extract time
-    const getTimeValue = (entry: ScheduleEntry): number => {
-      // Try to parse time from time field
-      if (entry.time) {
-        // Handle various time formats
-        if (/^\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?$/i.test(entry.time)) {
-          // Standard time format like "9:00 AM" or "14:30"
-          const timeParts = entry.time.split(":")
-          let hours = Number.parseInt(timeParts[0], 10)
-          const minutes = Number.parseInt(timeParts[1].replace(/[^\d]/g, ""), 10)
-
-          // Check for AM/PM
-          if (/PM/i.test(entry.time) && hours < 12) {
-            hours += 12
-          } else if (/AM/i.test(entry.time) && hours === 12) {
-            hours = 0
-          }
-
-          return hours * 60 + minutes
-        } else if (/^\d{3,4}$/.test(entry.time)) {
-          // Military time like "0900" or "1430"
-          const timeStr = entry.time.padStart(4, "0")
-          const hours = Number.parseInt(timeStr.substring(0, 2), 10)
-          const minutes = Number.parseInt(timeStr.substring(2, 4), 10)
-          return hours * 60 + minutes
-        }
-      }
-
-      // Try to extract time from date field if time field is empty or invalid
-      if (entry.date) {
-        // Check for date formats that might include time
-        const dateTimeMatch = entry.date.match(/(\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?)/i)
-        if (dateTimeMatch) {
-          const timeStr = dateTimeMatch[1]
-          const timeParts = timeStr.split(":")
-          let hours = Number.parseInt(timeParts[0], 10)
-          const minutes = Number.parseInt(timeParts[1].replace(/[^\d]/g, ""), 10)
-
-          // Check for AM/PM
-          if (/PM/i.test(timeStr) && hours < 12) {
-            hours += 12
-          } else if (/AM/i.test(entry.time) && hours === 12) {
-            hours = 0
-          }
-
-          return hours * 60 + minutes
-        }
-      }
-
-      // Default to midnight if no time can be extracted
-      return 0
-    }
-
-    // Helper function to get shift priority (for sorting)
-    const getShiftPriority = (shift: string): number => {
-      const lowerShift = (shift || "").toLowerCase()
-      if (lowerShift.includes("1st") || lowerShift === "1" || lowerShift === "first") {
-        return 1
-      } else if (lowerShift.includes("2nd") || lowerShift === "2" || lowerShift === "second") {
-        return 2
-      } else if (lowerShift.includes("sched")) {
-        return 3
-      } else if (lowerShift.includes("any")) {
-        return 4
-      }
-      // Default priority for unknown shifts
-      return 5
-    }
-
-    // Sort each truck type group
-    Object.keys(newData.byTruckType).forEach((type) => {
-      // First sort by shift priority, then by time, then by job name
-      newData.byTruckType[type].sort((a, b) => {
-        // First sort by shift priority
-        const shiftPriorityA = getShiftPriority(a.shift)
-        const shiftPriorityB = getShiftPriority(b.shift)
-
-        if (shiftPriorityA !== shiftPriorityB) {
-          return shiftPriorityA - shiftPriorityB
-        }
-
-        // If shifts are the same, sort by time
-        const timeA = getTimeValue(a)
-        const timeB = getTimeValue(b)
-
-        if (timeA !== timeB) {
-          return timeA - timeB
-        }
-
-        // If times are equal, sort by job name
-        return a.jobName.localeCompare(b.jobName)
-      })
-
-      // Then sort trucks within the same job and shift alphanumerically
-      const jobShiftGroups: Record<string, ScheduleEntry[]> = {}
-
-      // Group by job name and shift
-      newData.byTruckType[type].forEach((entry, entryIndex) => {
-        // Add a unique identifier to ensure entries with the same name are treated as separate
-        const key = `${entry.jobName}|${entry.shift}|${entry.time}|${entryIndex}`
-        if (!jobShiftGroups[key]) {
-          jobShiftGroups[key] = []
-        }
-        jobShiftGroups[key].push(entry)
-      })
-
-      // Sort trucks within each job/shift group
-      Object.keys(jobShiftGroups).forEach((key) => {
-        jobShiftGroups[key].sort((a, b) => {
-          return a.truckDriver.localeCompare(b.truckDriver, undefined, { numeric: true, sensitivity: "base" })
-        })
-      })
-
-      // Flatten back to array, maintaining the shift and time order
-      const sortedEntries: ScheduleEntry[] = []
-      Object.keys(jobShiftGroups).forEach((key) => {
-        sortedEntries.push(...jobShiftGroups[key])
-      })
-
-      newData.byTruckType[type] = sortedEntries
-    })
-
-    // Reclassify "Undefined" truck type entries as "Dump Truck"
-    if (newData.byTruckType["Undefined"]) {
-      const undefinedEntries = newData.byTruckType["Undefined"]
-      console.log(`Found ${undefinedEntries.length} entries with undefined truck type - reclassifying as Dump Truck`)
-
-      // Create Dump Truck category if it doesn't exist
-      if (!newData.byTruckType["Dump Truck"]) {
-        newData.byTruckType["Dump Truck"] = []
-      }
-
-      // Move non-ASPHALT entries to Dump Truck category
-      undefinedEntries.forEach((entry) => {
-        if (!entry.truckType.toUpperCase().includes("ASPHALT")) {
-          entry.truckType = "Dump Truck"
-          newData.byTruckType["Dump Truck"].push(entry)
-        } else {
-          // For ASPHALT entries, ensure they're in the ASPHALT category
-          if (!newData.byTruckType["ASPHALT"]) {
-            newData.byTruckType["ASPHALT"] = []
-          }
-          newData.byTruckType["ASPHALT"].push(entry)
-        }
-      })
-
-      // Remove the Undefined category
-      delete newData.byTruckType["Undefined"]
-    }
-
-    // Then return the filtered data
-    return newData
-  }, [data])
-
-  // Get incomplete entries across all truck types
-  const incompleteEntries = useMemo(() => {
-    const allIncomplete: ScheduleEntry[] = []
-
-    Object.entries(sortedData.byTruckType).forEach(([type, entries]) => {
-      const incomplete = entries.filter((entry) => !isEntryComplete(entry))
-      allIncomplete.push(...incomplete)
-    })
-
-    return allIncomplete
-  }, [sortedData])
-
-  // Generate driver summary - moved to useEffect to prevent infinite renders
-  useEffect(() => {
-    // Create a map to track the earliest time for each driver
-    const driverTimesMap: Record<string, { time: string; truckNumber: string }> = {}
-
-    // Process all entries to find drivers and their earliest times
-    Object.entries(sortedData.byTruckType).forEach(([type, entries]) => {
-      entries.filter(isEntryComplete).forEach((entry) => {
-        // Skip entries without drivers or with placeholder drivers
-        if (!entry.truckDriver || entry.truckDriver === "TBD" || entry.truckDriver === "") return
-
-        // Skip FIRST RETURNING entries
-        if (entry.truckDriver === "SMI-FIRST RETURNING TRUCK" || entry.truckDriver.includes("FIRST RETURNING")) return
-
-        // Extract driver information
-        let driverName = entry.truckDriver
-        const truckNumber = entry.truckDriver
-
-        // If it's a truck number, try to get the driver name
-        if (/^(SMI)?(\d+[Ps]?|MMH\d+)$/i.test(entry.truckDriver)) {
-          const driverInfo = getDriverForTruck(entry.truckDriver)
-          if (driverInfo && driverInfo.name) {
-            driverName = driverInfo.name
-          }
-        }
-
-        // Skip if we couldn't determine a driver name
-        if (!driverName || driverName === "TBD" || driverName === "No Driver" || driverName === "Not Assigned") return
-
-        // Use the show-up time if available, otherwise calculate it from load time using the specific offset
-        let showUpTime = entry.showUpTime || ""
-        if (!showUpTime) {
-          // Extract time from date if time is not available
-          let displayTime = entry.time
-          if (!displayTime && entry.date) {
-            const dateTimeMatch = entry.date.match(/(\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?)/i)
-            if (dateTimeMatch) {
-              displayTime = dateTimeMatch[1]
-            }
-          }
-
-          if (displayTime) {
-            // Use the specific offset for this entry, defaulting to 15 if not specified
-            const offset = entry.showUpOffset ? Number.parseInt(entry.showUpOffset, 10) : 15
-
-            // Check if this is an ASPHALT entry (case-insensitive check)
-            const normalizedTruckType = entry.truckType.toUpperCase().trim().replace(/\s+/g, " ")
-            const isAsphaltEntry =
-              normalizedTruckType === "ASPHALT" ||
-              normalizedTruckType === "ASPHALT TRUCK" ||
-              normalizedTruckType.includes("ASPHALT")
-            console.log(
-              `ASPHALT CHECK in Driver Summary - Entry: ${entry.jobName}, Type: "${entry.truckType}", Normalized: "${normalizedTruckType}", Is ASPHALT? ${isAsphaltEntry}`,
-            )
-
-            console.log(
-              `Driver ${driverName}: Using offset from CSV: ${entry.showUpOffset || "not specified"} (${offset} minutes)${isAsphaltEntry ? " - ASPHALT ENTRY" : ""}`,
-            )
-
-            const formattedTime = convertTo24HourFormat(displayTime)
-            if (formattedTime && formattedTime !== displayTime) {
-              showUpTime = addMinutesToTimeString(formattedTime, -offset)
-              console.log(
-                `Driver ${driverName}: Calculated show-up time = ${showUpTime} (${offset} minutes before ${formattedTime})${isAsphaltEntry ? " - ASPHALT ENTRY" : ""}`,
-              )
-            }
-          }
-        }
-
-        // Convert to 24-hour format for comparison
-        const formattedTime = convertTo24HourFormat(showUpTime)
-        if (!formattedTime) return // Skip if we couldn't format the time
-
-        // Update the driver's earliest time if this is earlier or if we don't have a time yet
-        if (!driverTimesMap[driverName] || formattedTime < driverTimesMap[driverName].time) {
-          driverTimesMap[driverName] = {
-            time: formattedTime,
-            truckNumber: truckNumber,
-          }
-        }
-      })
-    })
-
-    // Convert the map to an array for easier use in the component
-    const driverSummaryArray = Object.entries(driverTimesMap)
-      .sort(([, a], [, b]) => a.time.localeCompare(b.time))
-      .map(([name, info]) => ({ name, ...info }))
-
-    // Update the state with the generated driver summary
-    setDriverSummary(driverSummaryArray)
-  }, [sortedData])
-
-  // Add this new useEffect to load saved driver names from localStorage
-  useEffect(() => {
-    // Try to load saved driver names from localStorage
-    const savedDriverSummary = localStorage.getItem("driverSummary")
-    if (savedDriverSummary) {
-      try {
-        const parsedDriverSummary = JSON.parse(savedDriverSummary)
-
-        // Only update if we have the same number of drivers
-        // This prevents issues if the schedule has changed
-        if (parsedDriverSummary.length === driverSummary.length) {
-          // Create a new array that preserves truck numbers and times but uses saved names
-          const updatedDriverSummary = driverSummary.map((driver, index) => {
-            // Find the matching truck in the saved data
-            const savedDriver = parsedDriverSummary.find((saved) => saved.truckNumber === driver.truckNumber)
-
-            // If we found a matching truck, use the saved name
-            if (savedDriver) {
-              return {
-                ...driver,
-                name: savedDriver.name,
-              }
-            }
-
-            // Otherwise keep the original driver data
-            return driver
-          })
-
-          setDriverSummary(updatedDriverSummary)
-        }
-      } catch (error) {
-        console.error("Error loading saved driver names:", error)
-      }
-    }
-  }, [driverSummary.length]) // Only run when the number of drivers changes
-
-  // Update the handlePDFExport function to better handle errors
-  const handlePDFExport = useCallback(() => {
-    // Format the date for the filename using the report date
-    const dateStr = format(reportDate, "yyyy-MM-dd")
-    console.log("Using date for PDF filename:", dateStr)
-
-    // Calculate unassigned drivers for each truck type
-    const unassignedSummary: Record<TruckType, number> = {}
-    let totalUnassigned = 0
-    let totalOrders = 0
-
-    // Create a filtered version of the data with only complete entries
-    const filteredData = { ...sortedData }
-    Object.keys(filteredData.byTruckType).forEach((type) => {
-      filteredData.byTruckType[type] = filteredData.byTruckType[type].filter(isEntryComplete)
-    })
-
-    // Process each truck type
-    Object.entries(filteredData.byTruckType).forEach(([type, entries]) => {
-      const unassignedCount = entries.filter(
-        (entry) => !entry.truckDriver || entry.truckDriver === "TBD" || entry.truckDriver === "",
-      ).length
-
-      if (unassignedCount > 0) {
-        unassignedSummary[type as TruckType] = unassignedCount
-        totalUnassigned += unassignedCount
-      }
-
-      totalOrders += entries.length
-    })
-
-    // Show loading state
-    const button = document.querySelector("button[data-pdf-export]")
-    if (button) {
-      const originalContent = button.innerHTML
-      button.innerHTML =
-        '<svg class="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Creating PDF...'
-      button.disabled = true
-
-      try {
-        // Ensure reportDate is a valid Date object before passing it
-        const validReportDate = reportDate instanceof Date && !isNaN(reportDate.getTime()) ? reportDate : new Date()
-        console.log("Using valid report date for PDF:", validReportDate)
-
-        // Verify that filteredData has the expected structure
-        if (!filteredData || !filteredData.byTruckType) {
-          throw new Error("Invalid data structure: missing byTruckType")
-        }
-
-        // First, ensure all time values are properly formatted in the data
-        const pdfData = JSON.parse(JSON.stringify(filteredData)) // Deep clone to avoid modifying the original
-        Object.keys(pdfData.byTruckType).forEach((type) => {
-          pdfData.byTruckType[type].forEach((entry: any) => {
-            // Extract time from date if time is not available
-            if (!entry.time && entry.date) {
-              const dateTimeMatch = entry.date.match(/(\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?)/i)
-              if (dateTimeMatch) {
-                entry.time = dateTimeMatch[1]
-              }
-            }
-
-            // Ensure time is in a consistent format
-            if (entry.time) {
-              entry.time = convertTo24HourFormat(entry.time)
-            }
-
-            // Calculate show-up time if not already present
-            if (!entry.showUpTime && entry.time) {
-              const offset = entry.showUpOffset ? Number.parseInt(entry.showUpOffset, 10) : 15
-              entry.showUpTime = addMinutesToTimeString(convertTo24HourFormat(entry.time), -offset)
-            }
-          })
-        })
-
-        console.log("Exporting PDF with enhanced time data")
-        exportToPDF(
-          pdfData,
-          `${dateStr}.Spallina.Materials.Trucking.Schedule`,
-          validReportDate,
-          {
-            unassignedSummary,
-            totalUnassigned,
-            totalOrders,
-          },
-          dispatcherNotes,
-          driverSummary,
-        )
-      } catch (error) {
-        console.error("Error generating PDF:", error)
-        alert("There was an error generating the PDF. Please try again.")
-      } finally {
-        // Reset button after a delay
-        setTimeout(() => {
-          button.innerHTML = originalContent
-          button.disabled = false
-        }, 3000)
-      }
-    } else {
-      try {
-        // Ensure reportDate is a valid Date object before passing it
-        const validReportDate = reportDate instanceof Date && !isNaN(reportDate.getTime()) ? reportDate : new Date()
-        console.log("Using valid report date for PDF (no button):", validReportDate)
-
-        // Verify that filteredData has the expected structure
-        if (!filteredData || !filteredData.byTruckType) {
-          throw new Error("Invalid data structure: missing byTruckType")
-        }
-
-        exportToPDF(
-          filteredData,
-          `${dateStr}.Spallina.Materials.Trucking.Schedule`,
-          validReportDate,
-          {
-            unassignedSummary,
-            totalUnassigned,
-            totalOrders,
-          },
-          dispatcherNotes,
-          driverSummary,
-        )
-      } catch (error) {
-        console.error("Error generating PDF:", error)
-        alert("There was an error generating the PDF. Please try again.")
-      }
-    }
-  }, [reportDate, sortedData, dispatcherNotes, driverSummary])
-
-  const handlePrint = () => {
-    window.print()
+    return grouped
   }
 
-  const handlePrintPreview = useCallback(() => {
-    // Open a new window with just the print content
-    const printWindow = window.open("", "_blank")
-    if (!printWindow) return
+  // Group entries by truck type
+  const groupedEntries = groupEntriesByType(data.allEntries)
 
-    // Get all truck types, excluding "Unspecified"
-    const truckTypes = Object.keys(sortedData.byTruckType) as TruckType[]
-
-    // Format the report date
-    const formattedDate = format(reportDate, "MMMM d, yyyy")
-
-    // Create the print content
-    printWindow.document.write(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>Schedule Report - ${format(reportDate, "MM/dd/yyyy")}</title>
-      <style>
-        @page {
-          size: letter portrait;
-          margin: 0.5in;
-        }
-        body {
-          font-family: Arial, sans-serif;
-          font-size: 10pt;
-          line-height: 1.3;
-          color: black;
-          background: white;
-          margin: 0;
-          padding: 0;
-        }
-        .print-header {
-          text-align: center;
-          margin-bottom: 0.25in;
-        }
-        .print-header h1 {
-          font-size: 16pt;
-          margin: 0;
-          margin-bottom: 4pt;
-        }
-        .print-header p {
-          font-size: 12pt;
-          margin: 0;
-        }
-        .truck-section {
-          margin-bottom: 0.5in;
-          page-break-inside: avoid;
-        }
-        .truck-title {
-          font-size: 14pt;
-          font-weight: bold;
-          margin-bottom: 0.15in;
-          padding: 5pt;
-          border-radius: 4pt;
-          page-break-after: avoid;
-        }
-        table {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 9pt;
-          margin-bottom: 0.25in;
-          table-layout: fixed;
-        }
-        thead {
-          display: table-header-group; /* This makes headers repeat on each page */
-        }
-        tr {
-          page-break-inside: avoid; /* Prevent rows from breaking across pages */
-        }
-        th, td {
-          padding: 4pt;
-          border: 1pt solid #000;
-          text-align: left;
-          vertical-align: top;
-          overflow: hidden;
-          word-wrap: break-word;
-        }
-        th {
-          background-color: #f0f0f0;
-          font-weight: bold;
-        }
-        tr:nth-child(even) {
-          background-color: #f9f9f9;
-        }
-        .page-footer {
-          position: fixed;
-          bottom: 0.25in;
-          left: 0.5in;
-          right: 0.5in;
-          font-size: 8pt;
-          text-align: center;
-          border-top: 1pt solid #ddd;
-          padding-top: 0.1in;
-        }
-        .page-number {
-          float: right;
-        }
-        .timestamp {
-          float: left;
-        }
-        .page-break {
-          page-break-before: always;
-        }
-        
-        /* Column widths */
-        .col-job-name { width: 15%; }
-        .col-start-time { width: 5%; }
-        .col-load-time { width: 5%; }
-        .col-location { width: 18%; }
-        .col-driver { width: 10%; }
-        .col-materials { width: 15%; }
-        .col-pit { width: 8%; }
-        .col-qty { width: 6%; }
-        .col-trucks { width: 6%; }
-        .col-notes { width: 12%; }
-        
-        /* Driver summary table */
-        .driver-summary {
-          margin-top: 0.5in;
-          page-break-before: always;
-        }
-        .driver-summary h2 {
-          font-size: 14pt;
-          margin-bottom: 0.15in;
-        }
-        .driver-summary table {
-          width: 100%;
-        }
-        .driver-summary th {
-          background-color: #f0f0f0;
-        }
-        .col-driver-name { width: 40%; }
-        .col-truck-num { width: 25%; }
-        .col-show-time { width: 35%; }
-      </style>
-    </head>
-    <body>
-      <div class="print-header">
-        <h1>Spallina Materials Trucking Scheduler</h1>
-        <p>${formattedDate}</p>
-        ${dispatcherNotes.trim() ? `<p style="font-weight: bold; font-style: italic; margin-top: 6pt;">${dispatcherNotes}</p>` : ""}
-      </div>
-  `)
-
-    // Add each truck type section
-    truckTypes.forEach((type, typeIndex) => {
-      const entries = sortedData.byTruckType[type].filter(isEntryComplete)
-      if (entries.length === 0) return
-
-      // Add a page break class for new truck types (except the first one)
-      const pageBreakClass = typeIndex > 0 ? 'class="page-break"' : ""
-
-      printWindow.document.write(`
-      <div ${pageBreakClass} class="truck-section">
-        <div class="truck-title" style="background-color: ${getPrintTruckTypeColor(type)}">${type} Schedule</div>
-        <table>
-          <thead>
-            <tr>
-              <th class="col-job-name">Job Name</th>
-              <th class="col-start-time">Start<br>Time</th>
-              <th class="col-load-time">Load<br>Time</th>
-              <th class="col-location">Location</th>
-              <th class="col-driver">Driver</th>
-              <th class="col-materials">Materials</th>
-              <th class="col-pit">Pit<br>Location</th>
-              <th class="col-qty">Quantity</th>
-              <th class="col-trucks"># Trucks</th>
-              <th class="col-notes">Notes</th>
-            </tr>
-          </thead>
-          <tbody>
-    `)
-
-      // Add rows for this truck type
-      entries.forEach((entry, index) => {
-        // Extract time from date if time is not available
-        let displayTime = entry.time
-        if (!displayTime && entry.date) {
-          const dateTimeMatch = entry.date.match(/(\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?)/i)
-          if (dateTimeMatch) {
-            displayTime = dateTimeMatch[1]
-          }
-        }
-
-        // Calculate show-up time if not available
-        let showUpTime = entry.showUpTime || ""
-        if (!showUpTime && displayTime) {
-          const offset = entry.showUpOffset ? Number.parseInt(entry.showUpOffset, 10) : 15
-          showUpTime = addMinutesToTimeString(convertTo24HourFormat(displayTime), -offset)
-        }
-
-        // Log the values for debugging
-        console.log(
-          `Print Entry: ${entry.jobName}, Driver: ${entry.truckDriver}, ShowUpTime: ${showUpTime}, Load: ${displayTime}`,
-        )
-
-        printWindow.document.write(`
-      <tr>
-        <td class="col-job-name">${entry.jobName}</td>
-        <td class="col-start-time">${convertTo24HourFormat(showUpTime)}</td>
-        <td class="col-load-time">${convertTo24HourFormat(displayTime)}</td>
-        <td class="col-location">${entry.location}</td>
-        <td class="col-driver">${entry.truckDriver}</td>
-        <td class="col-materials">${entry.materials}</td>
-        <td class="col-pit">${entry.pit}</td>
-        <td class="col-qty">${entry.qty}</td>
-        <td class="col-trucks">${entry.numTrucks || "1"}</td>
-        <td class="col-notes">${entry.notes}</td>
-      </tr>
-    `)
-      })
-
-      printWindow.document.write(`
-          </tbody>
-        </table>
-        <div class="page-footer">
-          <span class="timestamp">${format(new Date(), "MM/dd/yyyy hh:mm a")}</span>
-          <span class="page-number">Page <span class="page-num"></span> of <span class="page-count"></span></span>
-        </div>
-      </div>
-    `)
-    })
-
-    // Add driver summary section
-    printWindow.document.write(`
-<div class="driver-summary">
-<h2>Spallina Drivers Summary</h2>
-<table>
-  <thead>
-    <tr>
-      <th class="col-driver-name">Driver Name</th>
-      <th class="col-truck-num">Truck #</th>
-      <th class="col-show-time">Show-up Time</th>
-    </tr>
-  </thead>
-  <tbody>
-    ${driverSummary
-      .map(
-        (driver) => `
-      <tr>
-        <td class="col-driver-name">${driver.name}</td>
-        <td class="col-truck-num">${driver.truckNumber}</td>
-        <td class="col-show-time">${driver.time}</td>
-      </tr>
-    `,
-      )
-      .join("")}
-  </tbody>
-</table>
-<div class="page-footer">
-  <span class="timestamp">${format(new Date(), "MM/dd/yyyy hh:mm a")}</span>
-  <span class="page-number">Page <span class="page-num"></span> of <span class="page-count"></span></span>
-</div>
-</div>
-`)
-
-    printWindow.document.write(`
-  <script>
-    // Add page numbers after printing is prepared
-    window.onload = function() {
-      // Count the total number of pages
-      const pageCount = Math.ceil(document.body.scrollHeight / 1056); // Approximate for letter size
-      
-      // Set the page count in all footers
-      const pageCountElements = document.querySelectorAll('.page-count');
-      pageCountElements.forEach(el => {
-        el.textContent = pageCount.toString();
-      });
-      
-      // Set individual page numbers
-      const pageNumElements = document.querySelectorAll('.page-num');
-      pageNumElements.forEach((el, index) => {
-        el.textContent = (index + 1).toString();
-      });
-    };
-  </script>
-  </body>
-  </html>
-`)
-
-    printWindow.document.close()
-
-    // Wait for content to load then print
-    printWindow.onload = () => {
-      printWindow.focus()
-      setTimeout(() => {
-        printWindow.print()
-      }, 1000) // Small delay to ensure styles are applied
-    }
-  }, [reportDate, sortedData, dispatcherNotes, driverSummary])
-
-  const toggleEditMode = () => {
-    setEditMode(!editMode)
-    setEditingEntry(null)
-  }
-
-  const startEditing = (index: number, type: TruckType) => {
+  // Handlers for editing actions
+  const handleStartEditing = (index: number, type: TruckType) => {
     setEditingEntry({ index, type })
   }
 
-  const cancelEditing = () => {
+  const handleCancelEditing = () => {
     setEditingEntry(null)
   }
 
-  const updateEntry = (updatedEntry: ScheduleEntry, index: number, type: TruckType) => {
-    // Create a deep copy of the data
-    const newData = { ...data }
+  const handleUpdateEntry = (updatedEntry: ScheduleEntry, index: number, type: TruckType) => {
+    console.log(`Updating entry at index ${index} of type ${type} with`, updatedEntry)
 
-    // Update the entry in the byTruckType object
-    newData.byTruckType[type][index] = updatedEntry
+    try {
+      // Create a copy of the current entries
+      const updatedAllEntries = [...data.allEntries]
 
-    // Find and update the entry in allEntries
-    const allEntriesIndex = newData.allEntries.findIndex(
-      (entry) => entry.jobName === updatedEntry.jobName && entry.truckDriver === updatedEntry.truckDriver,
-    )
-
-    if (allEntriesIndex !== -1) {
-      newData.allEntries[allEntriesIndex] = updatedEntry
-    }
-
-    setData(newData)
-    setEditingEntry(null)
-  }
-
-  // Function to delete an entry
-  const deleteEntry = (index: number, type: TruckType) => {
-    // Create a deep copy of the data
-    const newData = { ...data }
-
-    // Get the entry to be deleted
-    const entryToDelete = newData.byTruckType[type][index]
-
-    // Remove the entry from byTruckType
-    newData.byTruckType[type].splice(index, 1)
-
-    // Remove the entry from allEntries
-    const allEntriesIndex = newData.allEntries.findIndex(
-      (entry) => entry.jobName === entryToDelete.jobName && entry.truckDriver === entryToDelete.truckDriver,
-    )
-
-    if (allEntriesIndex !== -1) {
-      newData.allEntries.splice(allEntriesIndex, 1)
-    }
-
-    setData(newData)
-  }
-
-  // Function to duplicate an entry
-  const duplicateEntry = (index: number, type: TruckType) => {
-    // Create a deep copy of the data
-    const newData = { ...data }
-
-    // Get the entry to be duplicated
-    const entryToDuplicate = { ...newData.byTruckType[type][index] }
-
-    // Add the duplicated entry to byTruckType
-    newData.byTruckType[type].splice(index + 1, 0, entryToDuplicate)
-
-    // Add the duplicated entry to allEntries
-    newData.allEntries.push(entryToDuplicate)
-
-    setData(newData)
-  }
-
-  // Function to add a new entry
-  const addEntry = (type: TruckType) => {
-    // Create a deep copy of the data
-    const newData = { ...data }
-
-    // Create a new blank entry
-    const newEntry = createBlankEntry(type)
-
-    // Add the new entry to byTruckType
-    if (!newData.byTruckType[type]) {
-      newData.byTruckType[type] = []
-    }
-
-    newData.byTruckType[type].push(newEntry)
-
-    // Add to allEntries as well
-    newData.allEntries.push(newEntry)
-
-    setData(newData)
-  }
-
-  const truckTypes = Object.keys(sortedData.byTruckType) as TruckType[]
-
-  // Format the report date for display
-  const formattedReportDate = format(reportDate, "MMMM d, yyyy")
-
-  const handleDriverTimeChange = useCallback(
-    (driverName: string, truckNumber: string, newTime: string) => {
-      // Create a deep copy of the data
-      const newData = JSON.parse(JSON.stringify(data)) as ScheduleData
-
-      // Find all entries with this truck number
-      const entriesWithTruck: { entry: ScheduleEntry; type: string; index: number }[] = []
-
-      // Find all entries for this truck
-      Object.entries(newData.byTruckType).forEach(([type, entries]) => {
-        entries.forEach((entry, index) => {
-          if (entry.truckDriver === truckNumber) {
-            entriesWithTruck.push({ entry, type, index })
-          }
-        })
-      })
-
-      if (entriesWithTruck.length === 0) {
-        console.log(`No entries found for truck ${truckNumber}`)
-        return
-      }
-
-      // Sort entries by time to find the earliest
-      entriesWithTruck.sort((a, b) => {
-        const timeA = convertTo24HourFormat(a.entry.time || "")
-        const timeB = convertTo24HourFormat(b.entry.time || "")
-        return timeA.localeCompare(timeB)
-      })
-
-      // Get the earliest entry
-      const { entry: earliestEntry, type: earliestEntryType, index: earliestEntryIndex } = entriesWithTruck[0]
-
-      // Get the show-up offset from the entry, defaulting to 15 if not specified
-      const showUpOffset = earliestEntry.showUpOffset ? Number.parseInt(earliestEntry.showUpOffset, 10) : 15
-
-      // Calculate a new load time based on the show-up time and offset
-      const newLoadTime = addMinutesToTimeString(newTime, showUpOffset)
-
-      console.log(`Updating time for ${driverName} (${truckNumber}):`)
-      console.log(`  New show-up time: ${newTime}`)
-      console.log(`  Offset from CSV: ${earliestEntry.showUpOffset || "not specified"} (${showUpOffset} minutes)`)
-      console.log(`  New load time: ${newLoadTime}`)
-
-      // Update the entry's times
-      newData.byTruckType[earliestEntryType][earliestEntryIndex].showUpTime = newTime
-      newData.byTruckType[earliestEntryType][earliestEntryIndex].time = newLoadTime
-
-      // Update the entry's times
-      newData.byTruckType[earliestEntryType][earliestEntryIndex].showUpTime = newTime
-      newData.byTruckType[earliestEntryType][earliestEntryIndex].time = newLoadTime
-
-      // Also update in allEntries
-      const allEntriesIndex = newData.allEntries.findIndex(
-        (entry) => entry.jobName === earliestEntry?.jobName && entry.truckDriver === truckNumber,
+      // Find the actual index in allEntries
+      const actualIndex = data.allEntries.findIndex(
+        (entry) => entry.jobName === updatedEntry.jobName && entry.truckDriver === updatedEntry.truckDriver,
       )
 
-      if (allEntriesIndex !== -1) {
-        newData.allEntries[allEntriesIndex].showUpTime = newTime
-        newData.allEntries[allEntriesIndex].time = newLoadTime
+      if (actualIndex !== -1) {
+        updatedAllEntries[actualIndex] = updatedEntry
+      } else {
+        updatedAllEntries[index] = updatedEntry
       }
 
-      // Update the state
-      setData(newData)
+      const updatedData: ScheduleData = {
+        ...data,
+        allEntries: updatedAllEntries,
+        byTruckType: groupEntriesByType(updatedAllEntries),
+      }
 
-      // Show a toast notification
+      // Update local state
+      setData(updatedData)
+
+      // Call the onUpdateData prop if it exists
+      if (typeof onUpdateData === "function") {
+        onUpdateData(updatedData)
+      } else {
+        console.warn("onUpdateData is not a function or is undefined")
+      }
+
+      setEditingEntry(null)
+
       toast({
-        title: "Time updated",
-        description: `Updated show-up time for ${driverName} (${truckNumber}) to ${newTime}`,
+        title: "Entry updated",
+        description: "The schedule entry has been successfully updated.",
       })
-    },
-    [data, toast],
-  )
-
-  // Add a handler for driver name changes
-  const handleDriverNameChange = useCallback(
-    (oldName: string, truckNumber: string, newName: string) => {
-      // Create a deep copy of the data
-      const newData = JSON.parse(JSON.stringify(data)) as ScheduleData
-
-      // Find all entries with this truck number
-      let updatedEntries = 0
-
-      // Update entries in byTruckType
-      Object.entries(newData.byTruckType).forEach(([type, entries]) => {
-        entries.forEach((entry, index) => {
-          if (entry.truckDriver === truckNumber) {
-            // Update the driver name in the driver data
-            const driverInfo = getDriverForTruck(truckNumber)
-            if (driverInfo) {
-              // This would update the driver data, but we can't modify the constant
-              // Instead, we'll just update the entry
-              console.log(`Updating driver name for ${truckNumber} from ${oldName} to ${newName}`)
-              updatedEntries++
-            }
-          }
-        })
+    } catch (error) {
+      console.error("Error updating entry:", error)
+      toast({
+        title: "Update failed",
+        description: "There was an error updating the entry. Please try again.",
+        variant: "destructive",
       })
+    }
+  }
 
-      // Also update in allEntries
-      newData.allEntries.forEach((entry) => {
-        if (entry.truckDriver === truckNumber) {
-          // We don't modify the entry.truckDriver since that's the truck number
-          // But we would update the driver name in the driver data
+  const handleDeleteEntry = (index: number, type: TruckType) => {
+    console.log(`Deleting entry at index ${index} of type ${type}`)
+    try {
+      const updatedAllEntries = data.allEntries.filter((_, i) => i !== index)
+
+      const updatedData: ScheduleData = {
+        ...data,
+        allEntries: updatedAllEntries,
+        byTruckType: groupEntriesByType(updatedAllEntries),
+      }
+
+      // Update local state
+      setData(updatedData)
+
+      // Call the onUpdateData prop if it exists
+      if (typeof onUpdateData === "function") {
+        onUpdateData(updatedData)
+      } else {
+        console.warn("onUpdateData is not a function or is undefined")
+      }
+
+      toast({
+        title: "Entry deleted",
+        description: "The schedule entry has been successfully deleted.",
+      })
+    } catch (error) {
+      console.error("Error deleting entry:", error)
+      toast({
+        title: "Delete failed",
+        description: "There was an error deleting the entry. Please try again.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleDuplicateEntry = (index: number, type: TruckType) => {
+    console.log(`Duplicating entry at index ${index} of type ${type}`)
+    try {
+      const entryToDuplicate = data.allEntries[index]
+      const duplicatedEntry = { ...entryToDuplicate } // Create a shallow copy
+
+      const updatedAllEntries = [...data.allEntries]
+      updatedAllEntries.splice(index + 1, 0, duplicatedEntry) // Insert after the original
+
+      const updatedData: ScheduleData = {
+        ...data,
+        allEntries: updatedAllEntries,
+        byTruckType: groupEntriesByType(updatedAllEntries),
+      }
+
+      // Update local state
+      setData(updatedData)
+
+      // Call the onUpdateData prop if it exists
+      if (typeof onUpdateData === "function") {
+        onUpdateData(updatedData)
+      } else {
+        console.warn("onUpdateData is not a function or is undefined")
+      }
+
+      toast({
+        title: "Entry duplicated",
+        description: "The schedule entry has been successfully duplicated.",
+      })
+    } catch (error) {
+      console.error("Error duplicating entry:", error)
+      toast({
+        title: "Duplication failed",
+        description: "There was an error duplicating the entry. Please try again.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleAddEntry = (type: TruckType) => {
+    console.log(`Adding new entry of type ${type}`)
+    try {
+      const newEntry = createBlankEntry(type)
+      const updatedAllEntries = [...data.allEntries, newEntry]
+
+      const updatedData: ScheduleData = {
+        ...data,
+        allEntries: updatedAllEntries,
+        byTruckType: groupEntriesByType(updatedAllEntries),
+      }
+
+      // Update local state
+      setData(updatedData)
+
+      // Call the onUpdateData prop if it exists
+      if (typeof onUpdateData === "function") {
+        onUpdateData(updatedData)
+      } else {
+        console.warn("onUpdateData is not a function or is undefined")
+      }
+
+      toast({
+        title: "New entry added",
+        description: `A new entry for ${type} has been added.`,
+      })
+    } catch (error) {
+      console.error("Error adding entry:", error)
+      toast({
+        title: "Add failed",
+        description: "There was an error adding the entry. Please try again.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleNotesChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newNotes = e.target.value
+    setDispatcherNotes(newNotes)
+
+    try {
+      // Update the data object immediately
+      const updatedData: ScheduleData = {
+        ...data,
+        dispatcherNotes: newNotes,
+      }
+
+      // Update local state
+      setData(updatedData)
+
+      // Call the onUpdateData prop if it exists
+      if (typeof onUpdateData === "function") {
+        onUpdateData(updatedData) // Optimistically update the parent component
+      } else {
+        console.warn("onUpdateData is not a function or is undefined")
+      }
+    } catch (error) {
+      console.error("Error updating notes:", error)
+    }
+  }
+
+  const handleToggleEditMode = () => {
+    setEditMode(!editMode)
+    if (editMode) {
+      setEditingEntry(null) // Cancel any active editing
+    }
+  }
+
+  // Handle driver name updates
+  const handleUpdateDriverName = (oldName: string, newName: string) => {
+    console.log(`Updating driver name from ${oldName} to ${newName}`)
+
+    try {
+      // Update all entries with this driver name
+      const updatedAllEntries = data.allEntries.map((entry) => {
+        if (entry.truckDriver === oldName) {
+          return { ...entry, truckDriver: newName }
         }
+        return entry
       })
 
-      // Update the driver summary
-      const updatedDriverSummary = driverSummary.map((driver) => {
-        if (driver.truckNumber === truckNumber && driver.name === oldName) {
-          return { ...driver, name: newName }
-        }
-        return driver
-      })
+      const updatedData: ScheduleData = {
+        ...data,
+        allEntries: updatedAllEntries,
+        byTruckType: groupEntriesByType(updatedAllEntries),
+      }
 
-      setDriverSummary(updatedDriverSummary)
+      // Update local state
+      setData(updatedData)
 
-      // Show a toast notification
+      // Call the onUpdateData prop if it exists
+      if (typeof onUpdateData === "function") {
+        onUpdateData(updatedData)
+      } else {
+        console.warn("onUpdateData is not a function or is undefined")
+      }
+
       toast({
         title: "Driver name updated",
-        description: `Updated driver name for truck ${truckNumber} from ${oldName} to ${newName}`,
+        description: `Updated driver name from ${oldName} to ${newName}`,
       })
-    },
-    [data, driverSummary, toast],
-  )
+    } catch (error) {
+      console.error("Error updating driver name:", error)
+      toast({
+        title: "Update failed",
+        description: "There was an error updating the driver name. Please try again.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Handle driver time updates
+  const handleUpdateDriverTime = (driverName: string, field: "showUpTime" | "time", newValue: string) => {
+    console.log(`Updating ${field} for driver ${driverName} to ${newValue}`)
+
+    try {
+      // Update all entries with this driver name
+      const updatedAllEntries = data.allEntries.map((entry) => {
+        if (entry.truckDriver === driverName) {
+          return { ...entry, [field]: newValue }
+        }
+        return entry
+      })
+
+      const updatedData: ScheduleData = {
+        ...data,
+        allEntries: updatedAllEntries,
+        byTruckType: groupEntriesByType(updatedAllEntries),
+      }
+
+      // Update local state
+      setData(updatedData)
+
+      // Call the onUpdateData prop if it exists
+      if (typeof onUpdateData === "function") {
+        onUpdateData(updatedData)
+      } else {
+        console.warn("onUpdateData is not a function or is undefined")
+      }
+    } catch (error) {
+      console.error(`Error updating driver ${field}:`, error)
+      toast({
+        title: "Update failed",
+        description: `There was an error updating the driver ${field}. Please try again.`,
+        variant: "destructive",
+      })
+    }
+  }
+
+  const allTruckTypes = Object.keys(groupedEntries)
+
+  // Render fallback UI if no entries are available
+  if (!data || !data.allEntries || data.allEntries.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-48">
+        <h2 className="text-lg font-semibold">No schedule entries found.</h2>
+        <p className="text-muted-foreground">Please add entries to the schedule.</p>
+      </div>
+    )
+  }
 
   return (
-    <Card className="print:shadow-none" id="schedule-report">
-      <CardHeader className="flex flex-row items-center justify-between print:hidden">
-        <CardTitle>Schedule Report</CardTitle>
+    <div className="w-full">
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-2xl font-bold tracking-tight">Schedule Report</h2>
         <div className="flex gap-2">
-          <Button variant={editMode ? "default" : "outline"} size="sm" onClick={toggleEditMode}>
-            <Edit className="h-4 w-4 mr-2" />
-            {editMode ? "Done Editing" : "Edit"}
-          </Button>
-          <Button variant="outline" size="sm" onClick={handlePrintPreview}>
-            <Printer className="h-4 w-4 mr-2" />
-            Print
-          </Button>
-          <Button size="sm" onClick={handlePDFExport} data-pdf-export>
-            <FilePdf className="h-4 w-4 mr-2" />
-            Create PDF
+          <ExportButton
+            data={data}
+            driverSummary={data.allEntries?.map((entry) => ({
+              name: entry.truckDriver || "",
+              truckNumber: entry.truckDriver || "",
+              time: entry.showUpTime || entry.time || "",
+            }))}
+          />
+          <Button variant="outline" onClick={handleToggleEditMode}>
+            {editMode ? "View Mode" : "Edit Mode"}
           </Button>
         </div>
-        {/* Dispatcher Notes Input (only in edit mode) */}
-        {editMode && (
-          <div className="mb-6 border p-4 rounded-md">
-            <Label htmlFor="dispatcher-notes" className="mb-2 block font-medium">
-              Dispatcher Notes (will appear at top of report if not empty)
-            </Label>
-            <Textarea
-              id="dispatcher-notes"
-              value={dispatcherNotes}
-              onChange={(e) => setDispatcherNotes(e.target.value)}
-              placeholder="Enter important notes for dispatchers here..."
-              className="min-h-[80px]"
-            />
-          </div>
-        )}
-      </CardHeader>
-      <CardContent>
-        {/* Print header - only visible when printing */}
-        <div className="hidden print:block print-header">
-          <h1 className="text-2xl font-bold">Aggregate & Concrete Schedule</h1>
-          <p>{formattedReportDate}</p>
-        </div>
+      </div>
 
-        {/* Report date and dispatcher notes */}
-        <div className="mb-4 text-center">
-          <h2 className="text-xl font-semibold">Schedule for {formattedReportDate}</h2>
+      {/* Driver Summary Section */}
+      <div className="mb-6">
+        <DriverSummary
+          entries={data.allEntries}
+          onUpdateDriverName={handleUpdateDriverName}
+          onUpdateDriverTime={handleUpdateDriverTime}
+        />
+      </div>
 
-          {/* Dispatcher Notes */}
-          {dispatcherNotes.trim() && (
-            <div className="mt-4 mb-6 mx-auto max-w-3xl">
-              <p className="text-center font-bold italic text-lg">{dispatcherNotes}</p>
-            </div>
-          )}
-        </div>
+      <div className="mb-4">
+        <Label htmlFor="dispatcherNotes">Dispatcher Notes:</Label>
+        <Textarea
+          id="dispatcherNotes"
+          value={dispatcherNotes}
+          onChange={handleNotesChange}
+          placeholder="Enter notes for the dispatcher"
+          className="mt-1"
+        />
+      </div>
 
-        {/* Incomplete entries warning */}
-        {incompleteEntries.length > 0 && (
-          <Alert className="mb-6 bg-amber-50 border-amber-200">
-            <AlertCircle className="h-4 w-4 text-amber-600" />
-            <AlertTitle className="text-amber-800">Incomplete Entries ({incompleteEntries.length})</AlertTitle>
-            <AlertDescription className="text-amber-700">
-              <p className="mb-2">
-                The following entries are missing required information (Task Name, Location, Quantity, or Materials) and
-                will not be displayed in the report:
-              </p>
-              <div className="max-h-40 overflow-y-auto border border-amber-200 rounded-md p-2 bg-white">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-amber-200">
-                      <th className="p-1 text-left">Task Name</th>
-                      <th className="p-1 text-left">Truck Type</th>
-                      <th className="p-1 text-left">Missing Fields</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {incompleteEntries.map((entry, idx) => {
-                      const missingFields = []
-                      if (!entry.jobName?.trim()) missingFields.push("Task Name")
-                      if (!entry.location?.trim()) missingFields.push("Location")
-                      if (!entry.qty?.trim()) missingFields.push("Quantity")
-                      if (!entry.materials?.trim()) missingFields.push("Materials")
-
-                      return (
-                        <tr key={idx} className="border-b border-amber-100">
-                          <td className="p-1">{entry.jobName || "(Missing)"}</td>
-                          <td className="p-1">{entry.truckType}</td>
-                          <td className="p-1">{missingFields.join(", ")}</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </AlertDescription>
-          </Alert>
-        )}
-
-        <Tabs defaultValue="all" value={activeTab} onValueChange={setActiveTab} className="print:hidden">
-          <TabsList className="mb-4">
-            <TabsTrigger value="all">All Trucks</TabsTrigger>
-            {truckTypes.map((type) => (
-              <TabsTrigger key={type} value={type}>
-                {type}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-
-          <TabsContent value="all" className="space-y-8">
-            {truckTypes.map((type) => (
-              <TruckTypeSection
-                key={type}
-                type={type}
-                entries={sortedData.byTruckType[type]}
-                editMode={editMode}
-                editingEntry={editingEntry}
-                onStartEditing={startEditing}
-                onCancelEditing={cancelEditing}
-                onUpdateEntry={updateEntry}
-                onDeleteEntry={deleteEntry}
-                onDuplicateEntry={duplicateEntry}
-                onAddEntry={addEntry}
-              />
-            ))}
-          </TabsContent>
-
-          {truckTypes.map((type) => (
-            <TabsContent key={type} value={type} className="space-y-8">
-              <TruckTypeSection
-                type={type}
-                entries={sortedData.byTruckType[type]}
-                editMode={editMode}
-                editingEntry={editingEntry}
-                onStartEditing={startEditing}
-                onCancelEditing={cancelEditing}
-                onUpdateEntry={updateEntry}
-                onDeleteEntry={deleteEntry}
-                onDuplicateEntry={duplicateEntry}
-                onAddEntry={addEntry}
-              />
-            </TabsContent>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList>
+          <TabsTrigger value="all">All Types</TabsTrigger>
+          {allTruckTypes.map((type) => (
+            <TabsTrigger key={type} value={type}>
+              {type}
+            </TabsTrigger>
           ))}
-        </Tabs>
-
-        {/* Print view - always shows all content */}
-        <div className="hidden print:block space-y-8">
-          {truckTypes.map((type) => {
-            const completeEntries = sortedData.byTruckType[type].filter(isEntryComplete)
-            if (completeEntries.length === 0) return null
-
-            return (
-              <div key={type} className="print-truck-section">
-                <TruckTypeSection
-                  type={type}
-                  entries={completeEntries}
-                  editMode={false}
-                  editingEntry={null}
-                  onStartEditing={() => {}}
-                  onCancelEditing={() => {}}
-                  onUpdateEntry={() => {}}
-                  onDeleteEntry={() => {}}
-                  onDuplicateEntry={() => {}}
-                  onAddEntry={() => {}}
-                />
-              </div>
-            )
-          })}
-        </div>
-        {/* Driver Summary Section */}
-
-        <div className="mt-12 pt-6 border-t">
-          <h3 className="text-xl font-bold mb-4">
-            First Scheduled Load: Schedule liable to change. Any changes will be made by direct contact from the
-            Scheduling Manager.
-          </h3>
-          <div className="flex justify-between items-center mb-4">
-            {editMode && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  // Save the current driver summary to local storage
-                  localStorage.setItem("driverSummary", JSON.stringify(driverSummary))
-                  toast({
-                    title: "Driver names saved",
-                    description: "All driver name changes have been saved for this schedule",
-                  })
-                }}
-                className="ml-auto"
-              >
-                Save Driver Names
-              </Button>
-            )}
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr className="bg-muted">
-                  <th className="p-2 text-left border">Driver Name</th>
-                  <th className="p-2 text-left border">Truck #</th>
-                  <th className="p-2 text-left border">Show-up Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                {driverSummary.map((driver, index) => (
-                  <tr key={index} className={index % 2 === 0 ? "bg-background" : "bg-muted/30"}>
-                    <td className="p-2 border font-medium">
-                      {editMode ? (
-                        <Input
-                          value={driver.name}
-                          onChange={(e) => {
-                            // Create a new array with the updated driver name
-                            const updatedDriverSummary = [...driverSummary]
-                            updatedDriverSummary[index] = {
-                              ...driver,
-                              name: e.target.value,
-                            }
-                            setDriverSummary(updatedDriverSummary)
-                          }}
-                          className="h-8"
-                        />
-                      ) : (
-                        driver.name
-                      )}
-                    </td>
-                    <td className="p-2 border">{driver.truckNumber}</td>
-                    <td className="p-2 border">
-                      <DriverTimeEditor
-                        driverName={driver.name}
-                        truckNumber={driver.truckNumber}
-                        initialTime={driver.time}
-                        onTimeChange={handleDriverTimeChange}
-                        editMode={editMode}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+        </TabsList>
+        <TabsContent value="all">
+          {allTruckTypes.map((type) => (
+            <TruckTypeSection
+              key={type}
+              type={type}
+              entries={groupedEntries[type] || []}
+              editMode={editMode}
+              editingEntry={editingEntry}
+              onStartEditing={handleStartEditing}
+              onCancelEditing={handleCancelEditing}
+              onUpdateEntry={handleUpdateEntry}
+              onDeleteEntry={handleDeleteEntry}
+              onDuplicateEntry={handleDuplicateEntry}
+              onAddEntry={handleAddEntry}
+            />
+          ))}
+        </TabsContent>
+        {allTruckTypes.map((type) => (
+          <TabsContent key={type} value={type}>
+            <TruckTypeSection
+              type={type}
+              entries={groupedEntries[type] || []}
+              editMode={editMode}
+              editingEntry={editingEntry}
+              onStartEditing={handleStartEditing}
+              onCancelEditing={handleCancelEditing}
+              onUpdateEntry={handleUpdateEntry}
+              onDeleteEntry={handleDeleteEntry}
+              onDuplicateEntry={handleDuplicateEntry}
+              onAddEntry={handleAddEntry}
+            />
+          </TabsContent>
+        ))}
+      </Tabs>
+    </div>
   )
 }

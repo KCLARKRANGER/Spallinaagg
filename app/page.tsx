@@ -3,101 +3,58 @@
 import { useState } from "react"
 import { ScheduleUploader } from "@/components/schedule-uploader"
 import { ScheduleReport } from "@/components/schedule-report"
-import { ScheduleSummary } from "@/components/schedule-summary"
-import { DriverAssignmentHelper } from "@/components/driver-assignment-helper"
-import { AvailableTrucks } from "@/components/available-trucks"
-import { ScheduleHeader } from "@/components/schedule-header"
-import { ScheduleFilters } from "@/components/schedule-filters"
+import { ScheduleReportDebug } from "@/components/schedule-report-debug"
 import type { ScheduleData } from "@/types/schedule"
+import { Toaster } from "@/components/ui/toaster"
+import { Button } from "@/components/ui/button"
+import Link from "next/link"
 
 export default function Home() {
   const [scheduleData, setScheduleData] = useState<ScheduleData | null>(null)
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined)
-  const [searchTerm, setSearchTerm] = useState("")
-  const [selectedTruckType, setSelectedTruckType] = useState("all")
+  const [showDebug, setShowDebug] = useState(false)
 
-  // Handle file upload
-  const handleFileUpload = (data: ScheduleData) => {
+  const handleScheduleDataLoaded = (data: ScheduleData) => {
+    console.log("Schedule data loaded:", data)
     setScheduleData(data)
   }
 
-  // Handle driver assignment
-  const handleAssignDrivers = (updatedSchedule: ScheduleData) => {
-    setScheduleData(updatedSchedule)
-  }
-
-  // Handle assigning a truck to an order
-  const handleAssignTruck = (truckId: string, entryIndex: number, truckType: string) => {
-    if (!scheduleData) return
-
-    // Create a deep copy of the schedule data
-    const updatedSchedule = JSON.parse(JSON.stringify(scheduleData)) as ScheduleData
-
-    // Update the entry in the byTruckType object
-    updatedSchedule.byTruckType[truckType][entryIndex].truckDriver = truckId
-
-    // Find and update the entry in allEntries
-    const entry = updatedSchedule.byTruckType[truckType][entryIndex]
-    const allEntriesIndex = updatedSchedule.allEntries.findIndex(
-      (e) => e.jobName === entry.jobName && (!e.truckDriver || e.truckDriver === "TBD"),
-    )
-
-    if (allEntriesIndex !== -1) {
-      updatedSchedule.allEntries[allEntriesIndex].truckDriver = truckId
-    }
-
-    // Update the schedule data
-    setScheduleData(updatedSchedule)
-  }
-
-  // Handle clearing filters
-  const handleClearFilters = () => {
-    setSelectedDate(undefined)
-    setSearchTerm("")
-    setSelectedTruckType("all")
+  const handleUpdateScheduleData = (updatedData: ScheduleData) => {
+    console.log("Updating schedule data:", updatedData)
+    setScheduleData(updatedData)
   }
 
   return (
     <main className="container mx-auto py-6 px-4 md:px-6">
-      <ScheduleHeader />
-
-      <div className="mt-6 space-y-6">
-        {!scheduleData ? (
-          <ScheduleUploader onUpload={handleFileUpload} />
-        ) : (
-          <>
-            <ScheduleFilters
-              selectedDate={selectedDate}
-              onDateChange={setSelectedDate}
-              searchTerm={searchTerm}
-              onSearchChange={setSearchTerm}
-              onClearFilters={handleClearFilters}
-              truckTypes={scheduleData ? Object.keys(scheduleData.byTruckType) : []}
-              selectedTruckType={selectedTruckType}
-              onTruckTypeChange={setSelectedTruckType}
-            />
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2">
-                {scheduleData && (
-                  <>
-                    <AvailableTrucks scheduleData={scheduleData} onAssignTruck={handleAssignTruck} />
-                    <ScheduleReport data={scheduleData} />
-                  </>
-                )}
-              </div>
-              <div className="space-y-6">
-                {scheduleData && (
-                  <>
-                    <ScheduleSummary data={scheduleData} />
-                    <DriverAssignmentHelper scheduleData={scheduleData} onAssignDrivers={handleAssignDrivers} />
-                  </>
-                )}
-              </div>
-            </div>
-          </>
-        )}
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h1 className="text-2xl font-bold">Aggregate & Concrete Scheduler</h1>
+          <p className="text-muted-foreground">Upload and manage your trucking schedule</p>
+        </div>
+        <Link href="/trucks">
+          <Button variant="outline">Manage Trucks</Button>
+        </Link>
       </div>
+
+      <ScheduleUploader onScheduleDataLoaded={handleScheduleDataLoaded} />
+
+      {scheduleData && (
+        <div className="mt-6">
+          <div className="flex justify-between items-center mb-2">
+            <h2 className="text-xl font-semibold">Schedule Report</h2>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => setShowDebug(!showDebug)}>
+                {showDebug ? "Hide Debug" : "Show Debug"}
+              </Button>
+            </div>
+          </div>
+
+          <ScheduleReport data={scheduleData} onUpdateData={handleUpdateScheduleData} />
+
+          {showDebug && <ScheduleReportDebug scheduleData={scheduleData} />}
+        </div>
+      )}
+
+      <Toaster />
     </main>
   )
 }

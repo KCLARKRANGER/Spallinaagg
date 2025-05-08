@@ -274,12 +274,9 @@ export function processScheduleData(data: any[]): ScheduleData {
     }
     console.log(`Interval between trucks: ${interval} minutes`)
 
-    // Get the show-up time offset - CRITICAL FIX HERE
-    // Check all possible column names for the show-up offset
-    // First, log all column names to help debug
+    // Get the show-up time offset
     console.log("Looking for show-up offset in columns:", Object.keys(firstRow))
 
-    // CRITICAL FIX: For ASPHALT entries, we need to directly access the "Minutes Before Shift (SHOWUPTIME) (number)" column
     let showUpOffset = 15 // Default value
 
     if (isAsphaltEntry) {
@@ -364,13 +361,51 @@ export function processScheduleData(data: any[]): ScheduleData {
 
     console.log(`Final show-up time offset: ${showUpOffset} minutes`)
 
-    // Get assigned drivers
-    const driversAssigned = findValueInRow(firstRow, ["Drivers Assigned (labels)", "Drivers Assigned"]) || ""
+    // Get assigned drivers based on truck type
+    let driversAssigned = ""
+
+    // Log all available driver-related columns for debugging
+    console.log(
+      "Available driver columns:",
+      Object.keys(firstRow).filter((key) => key.toLowerCase().includes("driver")),
+    )
+
+    if (isAsphaltEntry) {
+      // For ASPHALT, first try the text column (F) without brackets
+      driversAssigned = firstRow["Drivers Assigned (short text)"] || firstRow["Drivers Assigned (text)"] || ""
+
+      // Log the raw value for debugging
+      console.log(
+        `ASPHALT: Raw driver assignment from column F: "${driversAssigned}" (type: ${typeof driversAssigned})`,
+      )
+
+      // If that's empty, try other driver columns
+      if (!driversAssigned) {
+        driversAssigned = firstRow["Drivers Assigned"] || firstRow["Drivers Assigned (labels)"] || ""
+        console.log(`ASPHALT: Fallback to other columns: "${driversAssigned}"`)
+      }
+
+      console.log(`ASPHALT: Final driver assignment: "${driversAssigned}" (type: ${typeof driversAssigned})`)
+    } else {
+      // For other truck types, use the labels column (G)
+      driversAssigned =
+        firstRow["Drivers Assigned (labels)"] ||
+        firstRow["Drivers Assigned"] ||
+        firstRow["Drivers Assigned (short text)"] ||
+        firstRow["Drivers Assigned (text)"] ||
+        ""
+      console.log(`Non-ASPHALT: Using driver assignment: "${driversAssigned}" (type: ${typeof driversAssigned})`)
+    }
+
     let driversList: string[] = []
 
     if (driversAssigned) {
-      const cleanDrivers = driversAssigned.replace(/^\[|\]$/g, "").trim()
+      // Remove brackets if present
+      const cleanDrivers = String(driversAssigned)
+        .replace(/^\[|\]$/g, "")
+        .trim()
       if (cleanDrivers) {
+        // Split by commas and clean up each driver name
         driversList = cleanDrivers
           .split(/\s*,\s*/)
           .map((d) => d.trim())
