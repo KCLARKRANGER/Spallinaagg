@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Printer } from "lucide-react"
 import type { ScheduleData } from "@/types/schedule"
 import { getDriverForTruck } from "@/lib/driver-data"
+import { format, parse, isValid } from "date-fns"
 
 interface ExportButtonProps {
   data: ScheduleData
@@ -57,35 +58,210 @@ function getDriverNameFromTruck(truckId: string): string {
   return truckId
 }
 
+// Extract the most common date from entries
+function extractReportDate(data: ScheduleData): Date {
+  // Default to today if we can't determine a date
+  const today = new Date()
+
+  if (!data || !data.allEntries || data.allEntries.length === 0) {
+    return today
+  }
+
+  // First, try to find entries with a properly formatted date
+  for (const entry of data.allEntries) {
+    if (entry.date && /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(entry.date)) {
+      try {
+        const [month, day, year] = entry.date.split("/").map(Number)
+        const parsedDate = new Date(year, month - 1, day)
+        if (isValid(parsedDate)) {
+          return parsedDate
+        }
+      } catch (e) {
+        // Continue to next entry
+      }
+    }
+  }
+
+  // Try to extract from the Monday.com format
+  for (const entry of data.allEntries) {
+    if (entry.date) {
+      // Try to match Monday.com format: "Friday, May 2nd 2025, 7:00:00 am -04:00"
+      const mondayMatch = entry.date.match(/([A-Za-z]+),\s+([A-Za-z]+)\s+(\d+)(?:st|nd|rd|th)?\s+(\d{4})/)
+      if (mondayMatch) {
+        try {
+          const [_, dayOfWeek, month, day, year] = mondayMatch
+
+          // Map month names to month numbers
+          const monthMap: Record<string, number> = {
+            January: 0,
+            February: 1,
+            March: 2,
+            April: 3,
+            May: 4,
+            June: 5,
+            July: 6,
+            August: 7,
+            September: 8,
+            October: 9,
+            November: 10,
+            December: 11,
+          }
+
+          const monthNum = monthMap[month] || 0
+          const parsedDate = new Date(Number(year), monthNum, Number(day))
+
+          if (isValid(parsedDate)) {
+            return parsedDate
+          }
+        } catch (e) {
+          console.error("Error parsing Monday.com date:", e)
+        }
+      }
+    }
+  }
+
+  // Count occurrences of each date
+  const dateCounts: Record<string, number> = {}
+  let maxCount = 0
+  let mostCommonDateStr = ""
+
+  // Try to find the most common date
+  data.allEntries.forEach((entry) => {
+    if (entry.date) {
+      // Normalize the date format
+      let dateStr = entry.date
+
+      // If the date contains time, extract just the date part
+      if (dateStr.includes(",")) {
+        const parts = dateStr.split(",")
+        if (parts.length >= 2) {
+          dateStr = parts[1].trim()
+        }
+      }
+
+      if (!dateCounts[dateStr]) {
+        dateCounts[dateStr] = 0
+      }
+      dateCounts[dateStr]++
+
+      if (dateCounts[dateStr] > maxCount) {
+        maxCount = dateCounts[dateStr]
+        mostCommonDateStr = dateStr
+      }
+    }
+  })
+
+  // If we found a common date, try to parse it
+  if (mostCommonDateStr) {
+    // Try different date formats
+    const formats = ["MM/dd/yyyy", "M/d/yyyy", "yyyy-MM-dd", "MMMM d yyyy", "MMMM do yyyy"]
+
+    for (const formatStr of formats) {
+      try {
+        const parsedDate = parse(mostCommonDateStr, formatStr, new Date())
+        if (isValid(parsedDate)) {
+          return parsedDate
+        }
+      } catch (e) {
+        // Try next format
+      }
+    }
+
+    // If we couldn't parse with standard formats, try to extract from more complex strings
+    // Example: "Wednesday, March 12th 2025"
+    const dateMatch = mostCommonDateStr.match(/([A-Za-z]+)\s+(\d+)(?:st|nd|rd|th)?\s+(\d{4})/)
+    if (dateMatch) {
+      const [_, month, day, year] = dateMatch
+      try {
+        // Map month names to month numbers
+        const monthMap: Record<string, number> = {
+          January: 0,
+          February: 1,
+          March: 2,
+          April: 3,
+          May: 4,
+          June: 5,
+          July: 6,
+          August: 7,
+          September: 8,
+          October: 9,
+          November: 10,
+          December: 11,
+        }
+
+        const monthNum = monthMap[month] || 0
+        const parsedDate = new Date(Number(year), monthNum, Number(day))
+
+        if (isValid(parsedDate)) {
+          return parsedDate
+        }
+      } catch (e) {
+        console.error("Error parsing complex date:", e)
+      }
+    }
+
+    // Try to directly parse the string as a last resort
+    try {
+      const directParsedDate = new Date(mostCommonDateStr)
+      if (isValid(directParsedDate)) {
+        return directParsedDate
+      }
+    } catch (e) {
+      console.error("Error directly parsing date:", e)
+    }
+  }
+
+  // If we couldn't determine a date, use today
+  return today
+}
+
 // Generate a simple HTML table
 function generateSimpleHTML(
   data: ScheduleData,
   driverSummary: Array<{ name: string; truckNumber: string; time: string }>,
 ) {
-  // Get today's date
-  const today = new Date()
-  const dateString = today.toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  })
+  // Extract the report date from the schedule data
+  const reportDate = extractReportDate(data)
+
+  // Format the date string
+  const dateString = format(reportDate, "EEEE, MMMM d, yyyy")
+
+  // Spallina Materials logo URL
+  const logoUrl =
+    "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Spallina.jpg-d9YdthrKQ8KKBMjr0z02HOvN9X2W6P.jpeg"
 
   // Start building HTML
   let html = `
     <!DOCTYPE html>
     <html>
     <head>
-      <title>Schedule Report - ${dateString}</title>
+      <title>Spallina Materials Trucking Schedule - ${dateString}</title>
       <style>
         body {
           font-family: Arial, sans-serif;
           margin: 20px;
           font-size: 12px;
         }
-        h1 {
-          font-size: 18px;
-          margin-bottom: 10px;
+        .logo-container {
           text-align: center;
+          margin-bottom: 15px;
+        }
+        .logo {
+          max-width: 350px;
+          height: auto;
+        }
+        h1 {
+          font-size: 24px;
+          margin-bottom: 5px;
+          text-align: center;
+          font-weight: bold;
+        }
+        .date-subheading {
+          font-size: 18px;
+          margin-top: 0;
+          margin-bottom: 20px;
+          text-align: center;
+          font-weight: normal;
         }
         h2 {
           font-size: 16px;
@@ -150,7 +326,13 @@ function generateSimpleHTML(
       <div class="print-button">
         <button onclick="window.print()">Print</button>
       </div>
-      <h1>Schedule Report - ${dateString}</h1>
+      
+      <div class="logo-container">
+        <img src="${logoUrl}" alt="Spallina Materials" class="logo" />
+      </div>
+      
+      <h1>Spallina Materials Trucking Schedule</h1>
+      <p class="date-subheading">${dateString}</p>
   `
 
   // Group entries by truck type
@@ -255,6 +437,8 @@ function generateSimpleHTML(
   // Add driver summary on its own page
   html += `
     <div class="page-break"></div>
+    <h1>Spallina Materials Trucking Schedule</h1>
+    <p class="date-subheading">${dateString}</p>
     <h2>Spallina Drivers Summary</h2>
     <table>
       <thead>
