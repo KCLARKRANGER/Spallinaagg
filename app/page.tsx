@@ -18,11 +18,6 @@ export default function Home() {
     setScheduleData(data)
   }
 
-  const handleUpdateScheduleData = (updatedData: ScheduleData) => {
-    console.log("Updating schedule data:", updatedData)
-    setScheduleData(updatedData)
-  }
-
   return (
     <main className="container mx-auto py-6 px-4 md:px-6">
       <div className="flex justify-between items-center mb-6">
@@ -48,7 +43,7 @@ export default function Home() {
             </div>
           </div>
 
-          <ScheduleReport data={scheduleData} onUpdateData={handleUpdateScheduleData} />
+          <ScheduleReport data={scheduleData} onUpdateData={setScheduleData} />
 
           {showDebug && <ScheduleReportDebug scheduleData={scheduleData} />}
         </div>

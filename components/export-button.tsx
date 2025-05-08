@@ -1,213 +1,156 @@
 "use client"
 
-import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Printer } from "lucide-react"
-import { useToast } from "@/components/ui/use-toast"
 import type { ScheduleData } from "@/types/schedule"
-import { format } from "date-fns"
-import { DRIVER_DATA } from "@/lib/driver-data"
+import { getDriverForTruck } from "@/lib/driver-data"
 
 interface ExportButtonProps {
   data: ScheduleData
-  driverSummary?: Array<{ name: string; truckNumber: string; time: string; loadTime?: string }>
+  driverSummary?: Array<{ name: string; truckNumber: string; time: string }>
 }
 
 export function ExportButton({ data, driverSummary = [] }: ExportButtonProps) {
-  const [isExporting, setIsExporting] = useState(false)
-  const { toast } = useToast()
+  const handleExport = () => {
+    // Create a new window for printing
+    const printWindow = window.open("", "_blank")
+    if (!printWindow) {
+      alert("Please allow pop-ups to export the schedule")
+      return
+    }
 
-  const handleExport = async () => {
-    setIsExporting(true)
+    // Generate simple HTML content
+    const html = generateSimpleHTML(data, driverSummary)
 
-    try {
-      // Create a new window for printing
-      const printWindow = window.open("", "_blank")
-      if (!printWindow) {
-        throw new Error("Could not open print window. Please check your popup settings.")
-      }
+    // Write the HTML to the new window
+    printWindow.document.open()
+    printWindow.document.write(html)
+    printWindow.document.close()
 
-      // Generate HTML content for the print window
-      const html = generatePrintHTML(data, driverSummary)
-
-      // Write the HTML to the new window
-      printWindow.document.write(html)
-      printWindow.document.close()
-
-      // Wait for resources to load then print
-      printWindow.onload = () => {
-        printWindow.print()
-        setIsExporting(false)
-      }
-
-      toast({
-        title: "Export successful",
-        description: "The schedule has been prepared for printing.",
-      })
-    } catch (error) {
-      console.error("Export error:", error)
-      setIsExporting(false)
-
-      toast({
-        title: "Export failed",
-        description: error instanceof Error ? error.message : "An unknown error occurred",
-        variant: "destructive",
-      })
+    // Wait for content to load before printing
+    printWindow.onload = () => {
+      printWindow.print()
     }
   }
 
   return (
-    <Button variant="default" onClick={handleExport} disabled={isExporting} className="flex items-center gap-2">
-      <Printer className="h-4 w-4" />
-      {isExporting ? "Preparing..." : "Export Schedule"}
+    <Button onClick={handleExport} className="bg-blue-600 hover:bg-blue-700 text-white">
+      <Printer className="h-4 w-4 mr-2" />
+      Export Schedule
     </Button>
   )
 }
 
-// Helper function to generate the HTML for printing
-function generatePrintHTML(
-  data: ScheduleData,
-  driverSummary: Array<{ name: string; truckNumber: string; time: string; loadTime?: string }>,
-) {
-  const currentDate = new Date()
-  const dateText = format(currentDate, "MMMM d, yyyy")
-  const timestamp = format(currentDate, "MM/dd/yyyy hh:mm a")
+// Helper function to get driver name from truck ID
+function getDriverNameFromTruck(truckId: string): string {
+  if (!truckId) return "TBD"
 
-  // Find driver name from truck number
-  function getDriverName(truckNumber: string): string {
-    // First check DRIVER_DATA
-    const driverEntry = DRIVER_DATA.find((d) => d.id === truckNumber)
-    if (driverEntry && driverEntry.name) {
-      return driverEntry.name
-    }
+  // Use the getDriverForTruck function from driver-data.ts
+  const driver = getDriverForTruck(truckId)
 
-    // If not found, return the truck number as is
-    return truckNumber
+  // If we found a driver with a name, return it
+  if (driver && driver.name && driver.name.trim() !== "") {
+    return driver.name
   }
 
-  // Start building the HTML
+  // Otherwise return the truck ID
+  return truckId
+}
+
+// Generate a simple HTML table
+function generateSimpleHTML(
+  data: ScheduleData,
+  driverSummary: Array<{ name: string; truckNumber: string; time: string }>,
+) {
+  // Get today's date
+  const today = new Date()
+  const dateString = today.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  })
+
+  // Start building HTML
   let html = `
     <!DOCTYPE html>
     <html>
     <head>
-      <title>Spallina Materials Trucking Scheduler - ${dateText}</title>
+      <title>Schedule Report - ${dateString}</title>
       <style>
         body {
           font-family: Arial, sans-serif;
-          margin: 0;
-          padding: 0;
-          font-size: 10pt;
-        }
-        .page {
-          page-break-after: always;
-          padding: 30px 40px;
-          position: relative;
-          box-sizing: border-box;
-          min-height: 100vh;
-        }
-        .page:last-child {
-          page-break-after: avoid;
+          margin: 20px;
+          font-size: 12px;
         }
         h1 {
-          font-size: 16pt;
-          font-weight: bold;
-          margin: 0 0 5px 0;
-          padding: 0;
+          font-size: 18px;
+          margin-bottom: 10px;
           text-align: center;
         }
         h2 {
-          font-size: 14pt;
-          font-weight: bold;
-          margin: 20px 0 10px 0;
-          padding: 0;
-        }
-        .date-display {
-          text-align: center;
-          margin: 0 0 15px 0;
-          font-size: 11pt;
+          font-size: 16px;
+          margin-top: 20px;
+          margin-bottom: 10px;
+          background-color: #f0f0f0;
+          padding: 5px;
         }
         table {
           width: 100%;
           border-collapse: collapse;
-          table-layout: fixed;
-          margin-bottom: 0;
+          margin-bottom: 20px;
         }
         th, td {
           border: 1px solid #000;
-          padding: 4px 6px;
+          padding: 5px;
           text-align: left;
-          font-size: 9pt;
-          overflow: hidden;
-          word-wrap: break-word;
         }
         th {
-          background-color: #f2f2f2;
-          font-weight: bold;
+          background-color: #f0f0f0;
         }
-        .footer {
-          position: absolute;
-          bottom: 10px;
-          left: 40px;
-          right: 40px;
-          display: flex;
-          justify-content: space-between;
-          font-size: 8pt;
-          color: #000;
+        tr:nth-child(even) {
+          background-color: #f9f9f9;
         }
-        .truck-type-header {
-          font-size: 14pt;
-          font-weight: bold;
-          margin: 0 0 10px 0;
-          padding: 0;
-        }
-        .notes {
-          margin-top: 10px;
-          font-style: italic;
-        }
-        @media print {
-          body {
-            -webkit-print-color-adjust: exact;
-            color-adjust: exact;
-          }
-          .page {
-            page-break-after: always;
-            height: 100vh;
-          }
-          .no-print {
-            display: none;
-          }
-        }
-        .print-buttons {
+        .print-button {
           text-align: center;
-          margin: 20px 0;
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          background: #fff;
-          padding: 10px;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-          z-index: 1000;
+          margin-bottom: 20px;
         }
-        .print-buttons button {
-          padding: 8px 16px;
-          margin: 0 5px;
-          background: #4b5563;
+        .print-button button {
+          padding: 10px 20px;
+          background-color: #4CAF50;
           color: white;
           border: none;
-          border-radius: 4px;
           cursor: pointer;
         }
-        .print-buttons button:hover {
-          background: #374151;
+        .page-break {
+          page-break-before: always;
+        }
+        .continued {
+          font-style: italic;
+          font-size: 10px;
+          text-align: right;
+          margin-bottom: 5px;
+        }
+        @media print {
+          .print-button {
+            display: none;
+          }
+          @page {
+            size: landscape;
+          }
+          thead {
+            display: table-header-group;
+          }
+          tfoot {
+            display: table-footer-group;
+          }
         }
       </style>
     </head>
     <body>
-      <div class="print-buttons no-print">
+      <div class="print-button">
         <button onclick="window.print()">Print</button>
-        <button onclick="window.close()">Close</button>
       </div>
+      <h1>Schedule Report - ${dateString}</h1>
   `
 
   // Group entries by truck type
@@ -225,6 +168,7 @@ function generatePrintHTML(
     "Conveyor",
     "Contractor",
   ]
+
   const sortedTruckTypes = Object.keys(entriesByType).sort((a, b) => {
     // Custom sort based on predefined order
     const aIndex = truckTypeOrder.indexOf(a)
@@ -243,52 +187,47 @@ function generatePrintHTML(
     return a.localeCompare(b)
   })
 
-  // Generate schedule by truck type
-  let currentPage = 1
-  const totalPages = getTotalPages(entriesByType, sortedTruckTypes, driverSummary)
-
-  sortedTruckTypes.forEach((truckType, typeIndex) => {
+  // Process each truck type - all on the same page
+  sortedTruckTypes.forEach((truckType, index) => {
     const entries = entriesByType[truckType] || []
 
-    // Skip if empty
+    // Skip if no entries
     if (entries.length === 0) return
 
-    // Sort entries
+    // Add truck type header
+    html += `<h2>${truckType} Schedule</h2>`
+
+    // Start table
+    html += `
+      <table>
+        <thead>
+          <tr>
+            <th>Job Name</th>
+            <th>Start Time</th>
+            <th>Load Time</th>
+            <th>Location</th>
+            <th>Driver</th>
+            <th>Materials</th>
+            <th>Pit Location</th>
+            <th>Quantity</th>
+            <th># Trucks</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+    `
+
+    // Sort entries by start time
     entries.sort((a, b) => {
-      // Sort by show-up time
       const aTime = a.showUpTime || ""
       const bTime = b.showUpTime || ""
       return aTime.localeCompare(bTime)
     })
 
-    // Start a new page for each truck type
-    html += `
-      <div class="page">
-        <h1>Spallina Materials Trucking Scheduler</h1>
-        <p class="date-display">${dateText}</p>
-        <div class="truck-type-header">${truckType} Schedule</div>
-        <table>
-          <thead>
-            <tr>
-              <th style="width: 15%;">Job Name</th>
-              <th style="width: 5%;">Start<br>Time</th>
-              <th style="width: 5%;">Load<br>Time</th>
-              <th style="width: 17%;">Location</th>
-              <th style="width: 8%;">Driver</th>
-              <th style="width: 15%;">Materials</th>
-              <th style="width: 12%;">Pit Location</th>
-              <th style="width: 8%;">Quantity</th>
-              <th style="width: 5%;">#<br>Trucks</th>
-              <th style="width: 10%;">Notes</th>
-            </tr>
-          </thead>
-          <tbody>
-    `
-
     // Add entries
     entries.forEach((entry) => {
-      // Get driver name from DRIVER_DATA if possible
-      const driverName = entry.truckDriver || ""
+      // Get driver name from truck ID
+      const driverName = entry.truckDriver ? getDriverNameFromTruck(entry.truckDriver) : ""
 
       html += `
         <tr>
@@ -306,43 +245,38 @@ function generatePrintHTML(
       `
     })
 
+    // Close table
     html += `
-          </tbody>
-        </table>
-        <div class="footer">
-          <span>Page ${currentPage} of ${totalPages}</span>
-          <span>${timestamp}</span>
-        </div>
-      </div>
+        </tbody>
+      </table>
     `
-
-    currentPage++
   })
 
-  // Generate driver summary page
+  // Add driver summary on its own page
   html += `
-    <div class="page">
-      <h1>Spallina Drivers Summary</h1>
-      <table>
-        <thead>
-          <tr>
-            <th>Driver Name</th>
-            <th>Truck #</th>
-            <th>Show-up Time</th>
-          </tr>
-        </thead>
-        <tbody>
+    <div class="page-break"></div>
+    <h2>Spallina Drivers Summary</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Driver Name</th>
+          <th>Truck #</th>
+          <th>Show-up Time</th>
+        </tr>
+      </thead>
+      <tbody>
   `
 
-  // Process drivers
-  // Get all drivers from the entries
+  // Process all drivers from entries
   const drivers = new Map()
 
   data.allEntries?.forEach((entry) => {
     if (entry.truckDriver) {
-      const driverName = getDriverName(entry.truckDriver)
+      // Get driver name from truck ID
+      const name = getDriverNameFromTruck(entry.truckDriver)
+
       drivers.set(entry.truckDriver, {
-        name: driverName,
+        name: name,
         truckNumber: entry.truckDriver,
         time: entry.showUpTime || "",
       })
@@ -367,30 +301,17 @@ function generatePrintHTML(
     `
   })
 
+  // Close driver table
   html += `
-        </tbody>
-      </table>
-      <div class="footer">
-        <span>Page ${currentPage} of ${totalPages}</span>
-        <span>${timestamp}</span>
-      </div>
-    </div>
+      </tbody>
+    </table>
   `
 
-  // Close the HTML
+  // Close HTML
   html += `
     </body>
     </html>
   `
 
   return html
-}
-
-// Helper function to calculate total pages
-function getTotalPages(entriesByType: Record<string, any[]>, sortedTruckTypes: string[], driverSummary: any[]) {
-  // Count how many truck types have entries
-  const truckTypePages = sortedTruckTypes.filter((type) => entriesByType[type] && entriesByType[type].length > 0).length
-
-  // Add driver summary page
-  return truckTypePages + 1
 }

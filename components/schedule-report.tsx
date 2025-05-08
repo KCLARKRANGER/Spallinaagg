@@ -24,7 +24,7 @@ import { ExportButton } from "./export-button"
 
 interface ScheduleReportProps {
   data: ScheduleData
-  onUpdateData?: (updatedData: ScheduleData) => void
+  onUpdateData: (updatedData: ScheduleData) => void
 }
 
 // Define truck type colors with a function to generate colors for new types
@@ -782,187 +782,109 @@ export function ScheduleReport({ data: initialData, onUpdateData }: ScheduleRepo
 
   const handleUpdateEntry = (updatedEntry: ScheduleEntry, index: number, type: TruckType) => {
     console.log(`Updating entry at index ${index} of type ${type} with`, updatedEntry)
+    const updatedAllEntries = [...data.allEntries]
 
-    try {
-      // Create a copy of the current entries
-      const updatedAllEntries = [...data.allEntries]
+    // Find the actual index in allEntries
+    const actualIndex = data.allEntries.findIndex(
+      (entry) => entry.jobName === updatedEntry.jobName && entry.truckDriver === updatedEntry.truckDriver,
+    )
 
-      // Find the actual index in allEntries
-      const actualIndex = data.allEntries.findIndex(
-        (entry) => entry.jobName === updatedEntry.jobName && entry.truckDriver === updatedEntry.truckDriver,
-      )
-
-      if (actualIndex !== -1) {
-        updatedAllEntries[actualIndex] = updatedEntry
-      } else {
-        updatedAllEntries[index] = updatedEntry
-      }
-
-      const updatedData: ScheduleData = {
-        ...data,
-        allEntries: updatedAllEntries,
-        byTruckType: groupEntriesByType(updatedAllEntries),
-      }
-
-      // Update local state
-      setData(updatedData)
-
-      // Call the onUpdateData prop if it exists
-      if (typeof onUpdateData === "function") {
-        onUpdateData(updatedData)
-      } else {
-        console.warn("onUpdateData is not a function or is undefined")
-      }
-
-      setEditingEntry(null)
-
-      toast({
-        title: "Entry updated",
-        description: "The schedule entry has been successfully updated.",
-      })
-    } catch (error) {
-      console.error("Error updating entry:", error)
-      toast({
-        title: "Update failed",
-        description: "There was an error updating the entry. Please try again.",
-        variant: "destructive",
-      })
+    if (actualIndex !== -1) {
+      updatedAllEntries[actualIndex] = updatedEntry
+    } else {
+      updatedAllEntries[index] = updatedEntry
     }
+
+    const updatedData: ScheduleData = {
+      ...data,
+      allEntries: updatedAllEntries,
+      byTruckType: groupEntriesByType(updatedAllEntries),
+    }
+
+    setData(updatedData)
+    onUpdateData(updatedData)
+    setEditingEntry(null)
+
+    toast({
+      title: "Entry updated",
+      description: "The schedule entry has been successfully updated.",
+    })
   }
 
   const handleDeleteEntry = (index: number, type: TruckType) => {
     console.log(`Deleting entry at index ${index} of type ${type}`)
-    try {
-      const updatedAllEntries = data.allEntries.filter((_, i) => i !== index)
+    const updatedAllEntries = data.allEntries.filter((_, i) => i !== index)
 
-      const updatedData: ScheduleData = {
-        ...data,
-        allEntries: updatedAllEntries,
-        byTruckType: groupEntriesByType(updatedAllEntries),
-      }
-
-      // Update local state
-      setData(updatedData)
-
-      // Call the onUpdateData prop if it exists
-      if (typeof onUpdateData === "function") {
-        onUpdateData(updatedData)
-      } else {
-        console.warn("onUpdateData is not a function or is undefined")
-      }
-
-      toast({
-        title: "Entry deleted",
-        description: "The schedule entry has been successfully deleted.",
-      })
-    } catch (error) {
-      console.error("Error deleting entry:", error)
-      toast({
-        title: "Delete failed",
-        description: "There was an error deleting the entry. Please try again.",
-        variant: "destructive",
-      })
+    const updatedData: ScheduleData = {
+      ...data,
+      allEntries: updatedAllEntries,
+      byTruckType: groupEntriesByType(updatedAllEntries),
     }
+
+    setData(updatedData)
+    onUpdateData(updatedData)
+
+    toast({
+      title: "Entry deleted",
+      description: "The schedule entry has been successfully deleted.",
+    })
   }
 
   const handleDuplicateEntry = (index: number, type: TruckType) => {
     console.log(`Duplicating entry at index ${index} of type ${type}`)
-    try {
-      const entryToDuplicate = data.allEntries[index]
-      const duplicatedEntry = { ...entryToDuplicate } // Create a shallow copy
+    const entryToDuplicate = data.allEntries[index]
+    const duplicatedEntry = { ...entryToDuplicate } // Create a shallow copy
 
-      const updatedAllEntries = [...data.allEntries]
-      updatedAllEntries.splice(index + 1, 0, duplicatedEntry) // Insert after the original
+    const updatedAllEntries = [...data.allEntries]
+    updatedAllEntries.splice(index + 1, 0, duplicatedEntry) // Insert after the original
 
-      const updatedData: ScheduleData = {
-        ...data,
-        allEntries: updatedAllEntries,
-        byTruckType: groupEntriesByType(updatedAllEntries),
-      }
-
-      // Update local state
-      setData(updatedData)
-
-      // Call the onUpdateData prop if it exists
-      if (typeof onUpdateData === "function") {
-        onUpdateData(updatedData)
-      } else {
-        console.warn("onUpdateData is not a function or is undefined")
-      }
-
-      toast({
-        title: "Entry duplicated",
-        description: "The schedule entry has been successfully duplicated.",
-      })
-    } catch (error) {
-      console.error("Error duplicating entry:", error)
-      toast({
-        title: "Duplication failed",
-        description: "There was an error duplicating the entry. Please try again.",
-        variant: "destructive",
-      })
+    const updatedData: ScheduleData = {
+      ...data,
+      allEntries: updatedAllEntries,
+      byTruckType: groupEntriesByType(updatedAllEntries),
     }
+
+    setData(updatedData)
+    onUpdateData(updatedData)
+
+    toast({
+      title: "Entry duplicated",
+      description: "The schedule entry has been successfully duplicated.",
+    })
   }
 
   const handleAddEntry = (type: TruckType) => {
     console.log(`Adding new entry of type ${type}`)
-    try {
-      const newEntry = createBlankEntry(type)
-      const updatedAllEntries = [...data.allEntries, newEntry]
+    const newEntry = createBlankEntry(type)
+    const updatedAllEntries = [...data.allEntries, newEntry]
 
-      const updatedData: ScheduleData = {
-        ...data,
-        allEntries: updatedAllEntries,
-        byTruckType: groupEntriesByType(updatedAllEntries),
-      }
-
-      // Update local state
-      setData(updatedData)
-
-      // Call the onUpdateData prop if it exists
-      if (typeof onUpdateData === "function") {
-        onUpdateData(updatedData)
-      } else {
-        console.warn("onUpdateData is not a function or is undefined")
-      }
-
-      toast({
-        title: "New entry added",
-        description: `A new entry for ${type} has been added.`,
-      })
-    } catch (error) {
-      console.error("Error adding entry:", error)
-      toast({
-        title: "Add failed",
-        description: "There was an error adding the entry. Please try again.",
-        variant: "destructive",
-      })
+    const updatedData: ScheduleData = {
+      ...data,
+      allEntries: updatedAllEntries,
+      byTruckType: groupEntriesByType(updatedAllEntries),
     }
+
+    setData(updatedData)
+    onUpdateData(updatedData)
+
+    toast({
+      title: "New entry added",
+      description: `A new entry for ${type} has been added.`,
+    })
   }
 
   const handleNotesChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newNotes = e.target.value
     setDispatcherNotes(newNotes)
 
-    try {
-      // Update the data object immediately
-      const updatedData: ScheduleData = {
-        ...data,
-        dispatcherNotes: newNotes,
-      }
-
-      // Update local state
-      setData(updatedData)
-
-      // Call the onUpdateData prop if it exists
-      if (typeof onUpdateData === "function") {
-        onUpdateData(updatedData) // Optimistically update the parent component
-      } else {
-        console.warn("onUpdateData is not a function or is undefined")
-      }
-    } catch (error) {
-      console.error("Error updating notes:", error)
+    // Update the data object immediately
+    const updatedData: ScheduleData = {
+      ...data,
+      dispatcherNotes: newNotes,
     }
+
+    setData(updatedData)
+    onUpdateData(updatedData) // Optimistically update the parent component
   }
 
   const handleToggleEditMode = () => {
@@ -976,81 +898,49 @@ export function ScheduleReport({ data: initialData, onUpdateData }: ScheduleRepo
   const handleUpdateDriverName = (oldName: string, newName: string) => {
     console.log(`Updating driver name from ${oldName} to ${newName}`)
 
-    try {
-      // Update all entries with this driver name
-      const updatedAllEntries = data.allEntries.map((entry) => {
-        if (entry.truckDriver === oldName) {
-          return { ...entry, truckDriver: newName }
-        }
-        return entry
-      })
-
-      const updatedData: ScheduleData = {
-        ...data,
-        allEntries: updatedAllEntries,
-        byTruckType: groupEntriesByType(updatedAllEntries),
+    // Update all entries with this driver name
+    const updatedAllEntries = data.allEntries.map((entry) => {
+      if (entry.truckDriver === oldName) {
+        return { ...entry, truckDriver: newName }
       }
+      return entry
+    })
 
-      // Update local state
-      setData(updatedData)
-
-      // Call the onUpdateData prop if it exists
-      if (typeof onUpdateData === "function") {
-        onUpdateData(updatedData)
-      } else {
-        console.warn("onUpdateData is not a function or is undefined")
-      }
-
-      toast({
-        title: "Driver name updated",
-        description: `Updated driver name from ${oldName} to ${newName}`,
-      })
-    } catch (error) {
-      console.error("Error updating driver name:", error)
-      toast({
-        title: "Update failed",
-        description: "There was an error updating the driver name. Please try again.",
-        variant: "destructive",
-      })
+    const updatedData: ScheduleData = {
+      ...data,
+      allEntries: updatedAllEntries,
+      byTruckType: groupEntriesByType(updatedAllEntries),
     }
+
+    setData(updatedData)
+    onUpdateData(updatedData)
+
+    toast({
+      title: "Driver name updated",
+      description: `Updated driver name from ${oldName} to ${newName}`,
+    })
   }
 
   // Handle driver time updates
   const handleUpdateDriverTime = (driverName: string, field: "showUpTime" | "time", newValue: string) => {
     console.log(`Updating ${field} for driver ${driverName} to ${newValue}`)
 
-    try {
-      // Update all entries with this driver name
-      const updatedAllEntries = data.allEntries.map((entry) => {
-        if (entry.truckDriver === driverName) {
-          return { ...entry, [field]: newValue }
-        }
-        return entry
-      })
-
-      const updatedData: ScheduleData = {
-        ...data,
-        allEntries: updatedAllEntries,
-        byTruckType: groupEntriesByType(updatedAllEntries),
+    // Update all entries with this driver name
+    const updatedAllEntries = data.allEntries.map((entry) => {
+      if (entry.truckDriver === driverName) {
+        return { ...entry, [field]: newValue }
       }
+      return entry
+    })
 
-      // Update local state
-      setData(updatedData)
-
-      // Call the onUpdateData prop if it exists
-      if (typeof onUpdateData === "function") {
-        onUpdateData(updatedData)
-      } else {
-        console.warn("onUpdateData is not a function or is undefined")
-      }
-    } catch (error) {
-      console.error(`Error updating driver ${field}:`, error)
-      toast({
-        title: "Update failed",
-        description: `There was an error updating the driver ${field}. Please try again.`,
-        variant: "destructive",
-      })
+    const updatedData: ScheduleData = {
+      ...data,
+      allEntries: updatedAllEntries,
+      byTruckType: groupEntriesByType(updatedAllEntries),
     }
+
+    setData(updatedData)
+    onUpdateData(updatedData)
   }
 
   const allTruckTypes = Object.keys(groupedEntries)
