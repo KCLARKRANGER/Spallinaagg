@@ -1072,6 +1072,42 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
     setDriverSummary(driverSummaryArray)
   }, [sortedData])
 
+  // Add this new useEffect to load saved driver names from localStorage
+  useEffect(() => {
+    // Try to load saved driver names from localStorage
+    const savedDriverSummary = localStorage.getItem("driverSummary")
+    if (savedDriverSummary) {
+      try {
+        const parsedDriverSummary = JSON.parse(savedDriverSummary)
+
+        // Only update if we have the same number of drivers
+        // This prevents issues if the schedule has changed
+        if (parsedDriverSummary.length === driverSummary.length) {
+          // Create a new array that preserves truck numbers and times but uses saved names
+          const updatedDriverSummary = driverSummary.map((driver, index) => {
+            // Find the matching truck in the saved data
+            const savedDriver = parsedDriverSummary.find((saved) => saved.truckNumber === driver.truckNumber)
+
+            // If we found a matching truck, use the saved name
+            if (savedDriver) {
+              return {
+                ...driver,
+                name: savedDriver.name,
+              }
+            }
+
+            // Otherwise keep the original driver data
+            return driver
+          })
+
+          setDriverSummary(updatedDriverSummary)
+        }
+      } catch (error) {
+        console.error("Error loading saved driver names:", error)
+      }
+    }
+  }, [driverSummary.length]) // Only run when the number of drivers changes
+
   // Update the handlePDFExport function to better handle errors
   const handlePDFExport = useCallback(() => {
     // Format the date for the filename using the report date
@@ -1890,6 +1926,25 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
             First Scheduled Load: Schedule liable to change. Any changes will be made by direct contact from the
             Scheduling Manager.
           </h3>
+          <div className="flex justify-between items-center mb-4">
+            {editMode && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  // Save the current driver summary to local storage
+                  localStorage.setItem("driverSummary", JSON.stringify(driverSummary))
+                  toast({
+                    title: "Driver names saved",
+                    description: "All driver name changes have been saved for this schedule",
+                  })
+                }}
+                className="ml-auto"
+              >
+                Save Driver Names
+              </Button>
+            )}
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full border-collapse">
               <thead>
@@ -1906,7 +1961,15 @@ export function ScheduleReport({ data: initialData }: ScheduleReportProps) {
                       {editMode ? (
                         <Input
                           value={driver.name}
-                          onChange={(e) => handleDriverNameChange(driver.name, driver.truckNumber, e.target.value)}
+                          onChange={(e) => {
+                            // Create a new array with the updated driver name
+                            const updatedDriverSummary = [...driverSummary]
+                            updatedDriverSummary[index] = {
+                              ...driver,
+                              name: e.target.value,
+                            }
+                            setDriverSummary(updatedDriverSummary)
+                          }}
                           className="h-8"
                         />
                       ) : (
