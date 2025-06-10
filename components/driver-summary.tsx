@@ -33,7 +33,10 @@ export function DriverSummary({ entries, onUpdateDriverName, onUpdateDriverTime 
     // Extract unique drivers and their earliest times
     const driverMap = new Map<string, DriverInfo>()
 
-    entries.forEach((entry) => {
+    // Filter out TBD entries
+    const validEntries = entries.filter((entry) => entry.truckDriver && entry.truckDriver !== "TBD")
+
+    validEntries.forEach((entry) => {
       if (!entry.truckDriver) return
 
       const truckNumber = entry.truckDriver

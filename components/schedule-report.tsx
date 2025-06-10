@@ -5,7 +5,7 @@ import type React from "react"
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import type { ScheduleData, ScheduleEntry, TruckType } from "@/types/schedule"
-import { Edit, Save, X, Trash2, Copy, Plus } from "lucide-react"
+import { Edit, Save, X, Trash2, Copy, Plus, Printer, FileDown } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { format, parse, isValid } from "date-fns"
 import { TruckDisplay } from "@/components/truck-display"
@@ -18,9 +18,8 @@ import { TimeAdjuster } from "@/components/time-adjuster"
 import { addMinutesToTimeString, convertTo24HourFormat } from "@/lib/time-utils"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/components/ui/use-toast"
-import { DriverSummary } from "./driver-summary"
-// Add the import for the ExportButton component
-import { ExportButton } from "./export-button"
+import { DriverSummary } from "@/components/driver-summary"
+import { getDriverForTruck } from "@/lib/driver-data"
 
 interface ScheduleReportProps {
   data: ScheduleData
@@ -132,7 +131,19 @@ function createBlankEntry(truckType: string): ScheduleEntry {
 
 // Function to check if an entry is complete (has all required fields)
 function isEntryComplete(entry: ScheduleEntry): boolean {
-  return !!(entry.jobName?.trim() && entry.location?.trim() && entry.qty?.trim() && entry.materials?.trim())
+  // Check for all essential fields that make a valid schedule entry
+  const hasJobName = !!entry.jobName?.trim()
+  const hasLocation = !!entry.location?.trim()
+  const hasQuantity = !!entry.qty?.trim()
+  const hasMaterials = !!entry.materials?.trim()
+  const hasTime = !!(entry.time?.trim() || entry.showUpTime?.trim())
+  const hasTruckType = !!entry.truckType?.trim()
+
+  // Check if driver is assigned (not TBD)
+  const hasValidDriver = entry.truckDriver && entry.truckDriver !== "TBD"
+
+  // For a complete entry, all essential fields must be present AND driver must be valid
+  return hasJobName && hasLocation && hasQuantity && hasMaterials && hasTime && hasTruckType && hasValidDriver
 }
 
 // Function to extract the most common date from entries
@@ -741,6 +752,7 @@ export function ScheduleReport({ data: initialData, onUpdateData }: ScheduleRepo
   const [dispatcherNotes, setDispatcherNotes] = useState<string>(initialData.dispatcherNotes || "")
   const [isSaving, setIsSaving] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
   const { toast } = useToast()
 
   useEffect(() => {
@@ -943,6 +955,387 @@ export function ScheduleReport({ data: initialData, onUpdateData }: ScheduleRepo
     onUpdateData(updatedData)
   }
 
+  // Prepare driver summary data
+  const driverSummary =
+    data.allEntries?.map((entry) => {
+      // Get driver name from truck ID
+      const driverName = entry.truckDriver ? getDriverForTruck(entry.truckDriver)?.name || entry.truckDriver : ""
+
+      return {
+        name: driverName,
+        truckNumber: entry.truckDriver || "",
+        time: entry.showUpTime || entry.time || "",
+      }
+    }) || []
+
+  // Handle export to PDF
+  const handleExportToPDF = async () => {
+    try {
+      setIsExporting(true)
+
+      // Extract the report date
+      const reportDate = extractReportDate(data)
+
+      // Format the date string for filename (no spaces or special chars)
+      const filenameDateString = format(reportDate, "yyyy-MM-dd")
+      const filename = `Spallina-Trucking-Schedule-${filenameDateString}.pdf`
+
+      // Dynamically import html2pdf.js
+      const html2pdf = (await import("html2pdf.js")).default
+
+      // Generate HTML content
+      const html = generateHTML(data, driverSummary)
+
+      // Create a temporary container for the HTML content
+      const container = document.createElement("div")
+      container.innerHTML = html
+      container.style.position = "absolute"
+      container.style.left = "-9999px"
+      document.body.appendChild(container)
+
+      // Configure html2pdf options
+      const options = {
+        margin: 10,
+        filename: filename,
+        image: { type: "jpeg", quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: "mm", format: "a4", orientation: "landscape" },
+      }
+
+      // Generate and download the PDF
+      await html2pdf().from(container).set(options).save()
+
+      // Clean up
+      document.body.removeChild(container)
+
+      toast({
+        title: "Success",
+        description: `Schedule exported as ${filename}`,
+      })
+    } catch (error) {
+      console.error("Error exporting to PDF:", error)
+      toast({
+        title: "Error",
+        description: "Failed to export schedule to PDF. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
+  // Handle print button click
+  const handlePrint = () => {
+    // Create a new window for printing
+    const printWindow = window.open("", "_blank")
+    if (!printWindow) {
+      toast({
+        title: "Error",
+        description: "Please allow pop-ups to print the schedule",
+        variant: "destructive",
+      })
+      return
+    }
+
+    // Generate HTML content
+    const html = generateHTML(data, driverSummary)
+
+    // Write the HTML to the new window
+    printWindow.document.open()
+    printWindow.document.write(html)
+    printWindow.document.close()
+
+    // Wait for content to load before printing
+    printWindow.onload = () => {
+      printWindow.print()
+    }
+  }
+
+  // Generate HTML for printing and PDF export
+  function generateHTML(
+    data: ScheduleData,
+    driverSummary: Array<{ name: string; truckNumber: string; time: string }>,
+  ): string {
+    // Extract the report date from the schedule data
+    const reportDate = extractReportDate(data)
+
+    // Format the date string
+    const dateString = format(reportDate, "EEEE, MMMM d, yyyy")
+
+    // Spallina Materials logo URL
+    const logoUrl =
+      "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Spallina.jpg-d9YdthrKQ8KKBMjr0z02HOvN9X2W6P.jpeg"
+
+    // Start building HTML
+    let html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Spallina Materials Trucking Schedule - ${dateString}</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            font-size: 12px;
+          }
+          .logo-container {
+            text-align: center;
+            margin-bottom: 15px;
+          }
+          .logo {
+            max-width: 350px;
+            height: auto;
+          }
+          h1 {
+            font-size: 24px;
+            margin-bottom: 5px;
+            text-align: center;
+            font-weight: bold;
+          }
+          .date-subheading {
+            font-size: 18px;
+            margin-top: 0;
+            margin-bottom: 20px;
+            text-align: center;
+            font-weight: normal;
+          }
+          h2 {
+            font-size: 16px;
+            margin-top: 20px;
+            margin-bottom: 10px;
+            background-color: #f0f0f0;
+            padding: 5px;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+          }
+          th, td {
+            border: 1px solid #000;
+            padding: 5px;
+            text-align: left;
+          }
+          th {
+            background-color: #f0f0f0;
+          }
+          tr:nth-child(even) {
+            background-color: #f9f9f9;
+          }
+          .print-button {
+            text-align: center;
+            margin-bottom: 20px;
+          }
+          .print-button button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+          }
+          .page-break {
+            page-break-before: always;
+          }
+          .continued {
+            font-style: italic;
+            font-size: 10px;
+            text-align: right;
+            margin-bottom: 5px;
+          }
+          @media print {
+            .print-button {
+              display: none;
+            }
+            @page {
+              size: landscape;
+            }
+            thead {
+              display: table-header-group;
+            }
+            tfoot {
+              display: table-footer-group;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="print-button">
+          <button onclick="window.print()">Print</button>
+        </div>
+        
+        <div class="logo-container">
+          <img src="${logoUrl}" alt="Spallina Materials" class="logo" />
+        </div>
+        
+        <h1>Spallina Materials Trucking Schedule</h1>
+        <p class="date-subheading">${dateString}</p>
+    `
+
+    // Group entries by truck type
+    const entriesByType = data.byTruckType || {}
+
+    // Sort truck types (matching PDF example order)
+    const truckTypeOrder = [
+      "ASPHALT",
+      "Dump Truck",
+      "Slinger",
+      "Trailer",
+      "Triaxle",
+      "6 Wheeler",
+      "Mixer",
+      "Conveyor",
+      "Contractor",
+    ]
+
+    const sortedTruckTypes = Object.keys(entriesByType).sort((a, b) => {
+      // Custom sort based on predefined order
+      const aIndex = truckTypeOrder.indexOf(a)
+      const bIndex = truckTypeOrder.indexOf(b)
+
+      // If both types are in our predefined list, sort by that order
+      if (aIndex !== -1 && bIndex !== -1) {
+        return aIndex - bIndex
+      }
+
+      // If only one type is in our list, prioritize it
+      if (aIndex !== -1) return -1
+      if (bIndex !== -1) return 1
+
+      // Otherwise sort alphabetically
+      return a.localeCompare(b)
+    })
+
+    // Process each truck type - all on the same page
+    sortedTruckTypes.forEach((truckType, index) => {
+      const entries = entriesByType[truckType] || []
+
+      // Skip if no entries
+      if (entries.length === 0) return
+
+      // Add truck type header
+      html += `<h2>${truckType} Schedule</h2>`
+
+      // Start table
+      html += `
+        <table>
+          <thead>
+            <tr>
+              <th>Job Name</th>
+              <th>Start Time</th>
+              <th>Load Time</th>
+              <th>Location</th>
+              <th>Driver</th>
+              <th>Materials</th>
+              <th>Pit Location</th>
+              <th>Quantity</th>
+              <th># Trucks</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+      `
+
+      // Sort entries by start time
+      entries.sort((a, b) => {
+        const aTime = a.showUpTime || ""
+        const bTime = b.showUpTime || ""
+        return aTime.localeCompare(bTime)
+      })
+
+      // Add entries
+      entries.forEach((entry) => {
+        // Get driver name from truck ID
+        const driverName = entry.truckDriver ? getDriverForTruck(entry.truckDriver)?.name || entry.truckDriver : ""
+
+        html += `
+          <tr>
+            <td>${entry.jobName || ""}</td>
+            <td>${entry.showUpTime || ""}</td>
+            <td>${entry.time || ""}</td>
+            <td>${entry.location || ""}</td>
+            <td>${driverName}</td>
+            <td>${entry.materials || ""}</td>
+            <td>${entry.pit || ""}</td>
+            <td>${entry.qty || ""}</td>
+            <td>${entry.numTrucks || "1"}</td>
+            <td>${entry.notes || ""}</td>
+          </tr>
+        `
+      })
+
+      // Close table
+      html += `
+          </tbody>
+        </table>
+      `
+    })
+
+    // Add driver summary on its own page
+    html += `
+      <div class="page-break"></div>
+      <h1>Spallina Materials Trucking Schedule</h1>
+      <p class="date-subheading">${dateString}</p>
+      <h2>Spallina Drivers Summary</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Driver Name</th>
+            <th>Truck #</th>
+            <th>Show-up Time</th>
+          </tr>
+        </thead>
+        <tbody>
+    `
+
+    // Process all drivers from entries
+    const drivers = new Map()
+
+    data.allEntries?.forEach((entry) => {
+      if (entry.truckDriver && entry.truckDriver !== "TBD") {
+        // Get driver name from truck ID
+        const name = entry.truckDriver ? getDriverForTruck(entry.truckDriver)?.name || entry.truckDriver : ""
+
+        drivers.set(entry.truckDriver, {
+          name: name,
+          truckNumber: entry.truckDriver,
+          time: entry.showUpTime || "",
+        })
+      }
+    })
+
+    // Sort drivers by show-up time
+    const sortedDrivers = Array.from(drivers.values()).sort((a, b) => {
+      if (!a.time) return 1
+      if (!b.time) return -1
+      return a.time.localeCompare(b.time)
+    })
+
+    // Add driver rows
+    sortedDrivers.forEach((driver) => {
+      html += `
+        <tr>
+          <td>${driver.name}</td>
+          <td>${driver.truckNumber}</td>
+          <td>${driver.time}</td>
+        </tr>
+      `
+    })
+
+    // Close driver table
+    html += `
+        </tbody>
+      </table>
+    `
+
+    // Close HTML
+    html += `
+      </body>
+      </html>
+    `
+
+    return html
+  }
+
   const allTruckTypes = Object.keys(groupedEntries)
 
   // Render fallback UI if no entries are available
@@ -960,14 +1353,18 @@ export function ScheduleReport({ data: initialData, onUpdateData }: ScheduleRepo
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-2xl font-bold tracking-tight">Schedule Report</h2>
         <div className="flex gap-2">
-          <ExportButton
-            data={data}
-            driverSummary={data.allEntries?.map((entry) => ({
-              name: entry.truckDriver || "",
-              truckNumber: entry.truckDriver || "",
-              time: entry.showUpTime || entry.time || "",
-            }))}
-          />
+          <Button
+            onClick={handleExportToPDF}
+            className="bg-blue-600 hover:bg-blue-700 text-white"
+            disabled={isExporting}
+          >
+            <FileDown className="h-4 w-4 mr-2" />
+            {isExporting ? "Exporting..." : "Export to PDF"}
+          </Button>
+          <Button onClick={handlePrint} variant="outline">
+            <Printer className="h-4 w-4 mr-2" />
+            Print
+          </Button>
           <Button variant="outline" onClick={handleToggleEditMode}>
             {editMode ? "View Mode" : "Edit Mode"}
           </Button>
@@ -995,20 +1392,21 @@ export function ScheduleReport({ data: initialData, onUpdateData }: ScheduleRepo
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList>
-          <TabsTrigger value="all">All Types</TabsTrigger>
+        <TabsList className="mb-4">
+          <TabsTrigger value="all">All Truck Types</TabsTrigger>
           {allTruckTypes.map((type) => (
             <TabsTrigger key={type} value={type}>
               {type}
             </TabsTrigger>
           ))}
         </TabsList>
-        <TabsContent value="all">
+
+        <TabsContent value="all" className="space-y-8">
           {allTruckTypes.map((type) => (
             <TruckTypeSection
               key={type}
-              type={type}
-              entries={groupedEntries[type] || []}
+              type={type as TruckType}
+              entries={groupedEntries[type as TruckType] || []}
               editMode={editMode}
               editingEntry={editingEntry}
               onStartEditing={handleStartEditing}
@@ -1020,11 +1418,12 @@ export function ScheduleReport({ data: initialData, onUpdateData }: ScheduleRepo
             />
           ))}
         </TabsContent>
+
         {allTruckTypes.map((type) => (
           <TabsContent key={type} value={type}>
             <TruckTypeSection
-              type={type}
-              entries={groupedEntries[type] || []}
+              type={type as TruckType}
+              entries={groupedEntries[type as TruckType] || []}
               editMode={editMode}
               editingEntry={editingEntry}
               onStartEditing={handleStartEditing}

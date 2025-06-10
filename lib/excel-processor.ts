@@ -122,6 +122,8 @@ function findValueInRow(row: any, possibleColumnNames: string[]): string {
   return ""
 }
 
+// Update the processScheduleData function to filter out incomplete entries before returning
+
 export function processScheduleData(data: any[]): ScheduleData {
   const allEntries: ScheduleEntry[] = []
   const byTruckType: Record<TruckType, ScheduleEntry[]> = {}
@@ -587,20 +589,40 @@ export function processScheduleData(data: any[]): ScheduleData {
   // Assign missing pit locations based on material types
   const entriesWithPits = assignMissingPitLocations(allEntries)
 
-  // Update the byTruckType entries with pit locations as well
+  // At the end of the function, before returning the data, filter out incomplete entries
+  const isEntryComplete = (entry: ScheduleEntry): boolean => {
+    // Check for all essential fields that make a valid schedule entry
+    const hasJobName = !!entry.jobName?.trim()
+    const hasLocation = !!entry.location?.trim()
+    const hasQuantity = !!entry.qty?.trim()
+    const hasMaterials = !!entry.materials?.trim()
+    const hasTime = !!(entry.time?.trim() || entry.showUpTime?.trim())
+    const hasTruckType = !!entry.truckType?.trim()
+
+    // Check if driver is assigned (not TBD)
+    const hasValidDriver = entry.truckDriver && entry.truckDriver !== "TBD"
+
+    return hasJobName && hasLocation && hasQuantity && hasMaterials && hasTime && hasTruckType && hasValidDriver
+  }
+
+  // Filter out incomplete entries
+  const completeEntries = entriesWithPits.filter(isEntryComplete)
+
+  // Update byTruckType to only include complete entries
+  const filteredByTruckType: Record<TruckType, ScheduleEntry[]> = {}
   Object.keys(byTruckType).forEach((type) => {
-    byTruckType[type] = assignMissingPitLocations(byTruckType[type])
+    filteredByTruckType[type] = byTruckType[type].filter(isEntryComplete)
   })
 
   console.log("Processed data:", {
-    allEntries: entriesWithPits.length,
-    truckTypes: Object.keys(byTruckType),
-    entriesByType: Object.entries(byTruckType).map(([type, entries]) => `${type}: ${entries.length}`),
+    allEntries: completeEntries.length,
+    truckTypes: Object.keys(filteredByTruckType),
+    entriesByType: Object.entries(filteredByTruckType).map(([type, entries]) => `${type}: ${entries.length}`),
   })
 
   return {
-    allEntries: entriesWithPits,
-    byTruckType,
+    allEntries: completeEntries,
+    byTruckType: filteredByTruckType,
   }
 }
 
