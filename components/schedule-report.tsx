@@ -978,39 +978,58 @@ export function ScheduleReport({ data: initialData, onUpdateData }: ScheduleRepo
 
       // Format the date string for filename (no spaces or special chars)
       const filenameDateString = format(reportDate, "yyyy-MM-dd")
-      const filename = `Spallina-Trucking-Schedule-${filenameDateString}.pdf`
+      const filename = `Spallina-Trucking-Schedule-${filenameDateString}`
 
-      // Dynamically import html2pdf.js
-      const html2pdf = (await import("html2pdf.js")).default
+      // Import the export function
+      const { exportToPDF } = await import("@/lib/export-utils")
 
-      // Generate HTML content
-      const html = generateHTML(data, driverSummary)
-
-      // Create a temporary container for the HTML content
-      const container = document.createElement("div")
-      container.innerHTML = html
-      container.style.position = "absolute"
-      container.style.left = "-9999px"
-      document.body.appendChild(container)
-
-      // Configure html2pdf options
-      const options = {
-        margin: 10,
-        filename: filename,
-        image: { type: "jpeg", quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true },
-        jsPDF: { unit: "mm", format: "a4", orientation: "landscape" },
+      // Prepare summary data
+      const summaryData = {
+        unassignedSummary: {} as Record<string, number>,
+        totalUnassigned: 0,
+        totalOrders: data.allEntries?.length || 0,
       }
 
-      // Generate and download the PDF
-      await html2pdf().from(container).set(options).save()
+      // Calculate unassigned entries by truck type
+      const unassignedEntries = data.allEntries?.filter((entry) => entry.truckDriver === "TBD") || []
+      unassignedEntries.forEach((entry) => {
+        const type = entry.truckType || "Undefined"
+        summaryData.unassignedSummary[type] = (summaryData.unassignedSummary[type] || 0) + 1
+        summaryData.totalUnassigned++
+      })
 
-      // Clean up
-      document.body.removeChild(container)
+      // Filter out entries with TBD drivers for the export
+      const completeEntries = data.allEntries?.filter((entry) => entry.truckDriver !== "TBD") || []
+
+      // Group complete entries by truck type
+      const groupedCompleteEntries: Record<string, ScheduleEntry[]> = {}
+      completeEntries.forEach((entry) => {
+        const type = entry.truckType || "Undefined"
+        if (!groupedCompleteEntries[type]) {
+          groupedCompleteEntries[type] = []
+        }
+        groupedCompleteEntries[type].push(entry)
+      })
+
+      // Prepare data for export
+      const exportData = {
+        allEntries: completeEntries,
+        byTruckType: groupedCompleteEntries,
+        scheduleEntries: completeEntries,
+        dispatcherNotes: dispatcherNotes,
+      }
+
+      // Prepare driver summary for export (filter out TBD drivers)
+      const exportDriverSummary = driverSummary.filter(
+        (driver) => driver.truckNumber !== "TBD" && driver.name !== "TBD",
+      )
+
+      // Call the export function
+      exportToPDF(exportData, filename, reportDate, summaryData, dispatcherNotes, exportDriverSummary)
 
       toast({
         title: "Success",
-        description: `Schedule exported as ${filename}`,
+        description: `Schedule exported as ${filename}.pdf`,
       })
     } catch (error) {
       console.error("Error exporting to PDF:", error)
