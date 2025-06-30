@@ -3,6 +3,10 @@ import autoTable from "jspdf-autotable"
 import type { ScheduleEntry } from "@/types/schedule"
 import { format } from "date-fns"
 
+// Spallina Materials logo URL
+const SPALLINA_LOGO_URL =
+  "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Spallina.jpg-d9YdthrKQ8KKBMjr0z02HOvN9X2W6P.jpeg"
+
 // Define ScheduleData type
 interface ScheduleData {
   scheduleEntries?: ScheduleEntry[]
@@ -146,6 +150,53 @@ export function exportToPDF(
 
     // Set initial y position
     let y = margin
+
+    // Add logo
+    try {
+      const logoImg = new Image()
+      logoImg.crossOrigin = "anonymous"
+
+      new Promise((resolve, reject) => {
+        logoImg.onload = () => {
+          try {
+            // Calculate logo dimensions (maintain aspect ratio)
+            const maxLogoWidth = 200
+            const maxLogoHeight = 60
+            const aspectRatio = logoImg.width / logoImg.height
+
+            let logoWidth = maxLogoWidth
+            let logoHeight = maxLogoWidth / aspectRatio
+
+            if (logoHeight > maxLogoHeight) {
+              logoHeight = maxLogoHeight
+              logoWidth = maxLogoHeight * aspectRatio
+            }
+
+            // Center the logo
+            const logoX = (pageWidth - logoWidth) / 2
+
+            // Add logo to PDF
+            doc.addImage(logoImg, "JPEG", logoX, y, logoWidth, logoHeight)
+            y += logoHeight + 15 // Add space after logo
+
+            resolve(true)
+          } catch (error) {
+            console.warn("Error adding logo to PDF:", error)
+            resolve(true) // Continue without logo
+          }
+        }
+
+        logoImg.onerror = () => {
+          console.warn("Could not load logo for PDF")
+          resolve(true) // Continue without logo
+        }
+
+        logoImg.src = SPALLINA_LOGO_URL
+      })
+    } catch (error) {
+      console.warn("Error loading logo:", error)
+      // Continue without logo
+    }
 
     // Add title and date
     doc.setFontSize(18)
