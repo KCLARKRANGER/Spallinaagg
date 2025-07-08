@@ -122,7 +122,134 @@ function findValueInRow(row: any, possibleColumnNames: string[]): string {
   return ""
 }
 
-// Update the processScheduleData function to filter out incomplete entries before returning
+// SPALLINA trucks (both SMI and SPA prefixes) that get offset - all others are contractors with show-up time = load time
+const SPALLINA_TRUCKS_WITH_OFFSET = [
+  // SMI trucks
+  "SMI106",
+  "SMI107",
+  "SMI108",
+  "SMI110",
+  "SMI111",
+  "SMI112",
+  "SMI114",
+  "SMI36",
+  "SMI38",
+  "SMI40",
+  "SMI41",
+  "SMI42",
+  "SMI43",
+  "SMI43P", // SMI43 PUP
+  "SMI43 PUP",
+  "SMI46",
+  "SMI48",
+  "SMI48P", // SMI48 PUP
+  "SMI48 PUP",
+  "SMI49",
+  "SMI49P", // SMI49 PUP
+  "SMI49 PUP",
+  "SMI50",
+  "SMI50P", // SMI50 PUP
+  "SMI50 PUP",
+  "SMI51",
+  "SMI67",
+  "SMI68",
+  "SMI69",
+  "SMI70",
+  "SMI71",
+  "SMI72",
+  "SMI78",
+  "SMI85",
+  "SMI88",
+  "SMI92",
+  "SMI92S",
+  "SMI94",
+  "SMI94S",
+  "SMI95",
+  "SMI95S",
+  "SMI96",
+  "SMI96S",
+  "SMI97",
+  "SMI97S",
+  // MMH trucks (Spallina fleet) - FIXED: Ensure MMH06 is included
+  "MMH06",
+  "MMH6",
+  "MMH08",
+  "MMH8",
+  // SPA trucks (same numbers, different prefix)
+  "SPA106",
+  "SPA107",
+  "SPA108",
+  "SPA110",
+  "SPA111",
+  "SPA112",
+  "SPA114",
+  "SPA33", // FIXED: Ensure SPA33 is included
+  "SPA36",
+  "SPA38",
+  "SPA40",
+  "SPA41",
+  "SPA42",
+  "SPA43",
+  "SPA43 PUP",
+  "SPA46",
+  "SPA48",
+  "SPA48 PUP",
+  "SPA49",
+  "SPA49 PUP",
+  "SPA50",
+  "SPA50 PUP",
+  "SPA51",
+  "SPA67",
+  "SPA68",
+  "SPA69",
+  "SPA70",
+  "SPA71",
+  "SPA72",
+  "SPA78",
+  "SPA85",
+  "SPA88",
+  "SPA92",
+  "SPA92S",
+  "SPA94",
+  "SPA94S",
+  "SPA95",
+  "SPA95S",
+  "SPA96",
+  "SPA96S",
+  "SPA97",
+  "SPA97S",
+]
+
+// Function to check if a truck should get offset (is a Spallina truck - SMI or SPA)
+function isSpallinaTruckWithOffset(truckDriver: string): boolean {
+  if (!truckDriver || truckDriver.trim() === "" || truckDriver === "TBD") {
+    return false
+  }
+
+  // Clean the truck name (remove asterisk, trim whitespace)
+  const cleanName = truckDriver.replace(/^\*/, "").trim()
+
+  // Check if it's in the Spallina trucks list (SMI or SPA) - case insensitive
+  const isSpallinaTruck = SPALLINA_TRUCKS_WITH_OFFSET.some((spallinaTruck) => {
+    const upperCleanName = cleanName.toUpperCase()
+    const upperSpallinaTruck = spallinaTruck.toUpperCase()
+
+    return (
+      upperCleanName === upperSpallinaTruck ||
+      upperCleanName === upperSpallinaTruck.replace(/P$/, " PUP") ||
+      (spallinaTruck.includes("MMH") && (upperCleanName === "MMH6" || upperCleanName === "MMH06")) ||
+      (spallinaTruck.includes("MMH") && (upperCleanName === "MMH8" || upperCleanName === "MMH08"))
+    )
+  })
+
+  console.log(
+    `🚛 EXCEL PROCESSOR - Checking truck "${truckDriver}" (clean: "${cleanName}"): ${
+      isSpallinaTruck ? "✅ SPALLINA TRUCK WITH OFFSET" : "❌ CONTRACTOR/OTHER - NO OFFSET (show-up = load time)"
+    }`,
+  )
+
+  return isSpallinaTruck
+}
 
 export function processScheduleData(data: any[]): ScheduleData {
   const allEntries: ScheduleEntry[] = []
@@ -276,89 +403,42 @@ export function processScheduleData(data: any[]): ScheduleData {
     }
     console.log(`Interval between trucks: ${interval} minutes`)
 
-    // Get the show-up time offset
+    // Get the show-up time offset from Column O - use this if provided, otherwise default to 15 minutes for Spallina trucks
     console.log("Looking for show-up offset in columns:", Object.keys(firstRow))
 
-    let showUpOffset = 15 // Default value
+    let showUpOffset = 15 // Default value for Spallina trucks
 
-    if (isAsphaltEntry) {
-      // For ASPHALT entries, try these specific columns in order
-      const asphaltOffsetColumns = [
-        "Minutes Before Shift (SHOWUPTIME) (number)",
-        "Minutes Before Shift (SHOWUPTIME)",
-        "Minutes Before Shift",
-      ]
+    // Try to get the offset from column O (Minutes Before Shift)
+    const showUpOffsetStr = findValueInRow(firstRow, [
+      "Minutes Before Shift (SHOWUPTIME) (number)",
+      "Minutes Before Shift (SHOWUPTIME)",
+      "Minutes Before Shift",
+      "SHOWUPTIME",
+      "Show-up Time Offset (minutes)",
+      "Show-up Time Offset",
+      "N",
+      "O", // Column O
+    ])
 
-      // Try each column name directly
-      for (const colName of asphaltOffsetColumns) {
-        if (firstRow[colName] !== undefined) {
-          const rawValue = firstRow[colName]
-          console.log(`ASPHALT: Found offset in column "${colName}": "${rawValue}" (type: ${typeof rawValue})`)
+    console.log(`Raw show-up offset value from CSV Column O: "${showUpOffsetStr}"`)
 
-          try {
-            // Parse the value, handling both number and string types
-            const parsedValue = typeof rawValue === "number" ? rawValue : Number.parseFloat(String(rawValue).trim())
-            if (!isNaN(parsedValue)) {
-              showUpOffset = Math.round(parsedValue)
-              console.log(`ASPHALT: Successfully parsed offset: ${showUpOffset} minutes from column "${colName}"`)
-              break // Exit the loop once we've found a valid value
-            }
-          } catch (e) {
-            console.warn(`ASPHALT: Error parsing offset from column "${colName}":`, e)
-          }
+    if (showUpOffsetStr && showUpOffsetStr.trim() !== "") {
+      try {
+        const parsedOffset = Number.parseFloat(showUpOffsetStr.trim())
+        if (!isNaN(parsedOffset)) {
+          showUpOffset = Math.round(parsedOffset)
+          console.log(`✅ Using custom show-up offset from Column O: ${showUpOffset} minutes`)
+        } else {
+          console.warn(`Could not parse show-up time offset (NaN): "${showUpOffsetStr}", using default 15 minutes`)
         }
+      } catch (e) {
+        console.warn(
+          `Could not parse show-up time offset (exception): "${showUpOffsetStr}", using default 15 minutes`,
+          e,
+        )
       }
-
-      // If we still don't have a value, try column N directly
-      if (showUpOffset === 15 && firstRow["N"] !== undefined) {
-        const nValue = firstRow["N"]
-        console.log(`ASPHALT: Trying column N directly: "${nValue}" (type: ${typeof nValue})`)
-
-        try {
-          const parsedN = typeof nValue === "number" ? nValue : Number.parseFloat(String(nValue).trim())
-          if (!isNaN(parsedN)) {
-            showUpOffset = Math.round(parsedN)
-            console.log(`ASPHALT: Successfully parsed offset from column N: ${showUpOffset} minutes`)
-          }
-        } catch (e) {
-          console.warn("ASPHALT: Error parsing column N:", e)
-        }
-      }
-
-      console.log(`ASPHALT ENTRY: ${jobName} - Final offset value: ${showUpOffset} minutes`)
     } else {
-      // For non-ASPHALT entries, use the standard approach
-      const showUpOffsetStr = findValueInRow(firstRow, [
-        "Minutes Before Shift (SHOWUPTIME) (number)",
-        "Minutes Before Shift (SHOWUPTIME)",
-        "Minutes Before Shift",
-        "SHOWUPTIME",
-        "Show-up Time Offset (minutes)",
-        "Show-up Time Offset",
-        "N",
-      ])
-
-      console.log(`Raw show-up offset value from CSV: "${showUpOffsetStr}"`)
-
-      if (firstRow["N"] !== undefined) {
-        console.log(`Direct value from column N: "${firstRow["N"]}"`)
-      }
-
-      if (showUpOffsetStr && showUpOffsetStr.trim() !== "") {
-        try {
-          const parsedOffset = Number.parseFloat(showUpOffsetStr.trim())
-          if (!isNaN(parsedOffset)) {
-            showUpOffset = Math.round(parsedOffset)
-            console.log(`Found custom show-up offset: ${showUpOffset} minutes`)
-          } else {
-            console.warn(`Could not parse show-up time offset (NaN): "${showUpOffsetStr}"`)
-          }
-        } catch (e) {
-          console.warn(`Could not parse show-up time offset (exception): "${showUpOffsetStr}"`, e)
-        }
-      } else {
-        console.log(`No show-up offset found, using default: ${showUpOffset} minutes`)
-      }
+      console.log(`No show-up offset found in Column O, using default for Spallina trucks: ${showUpOffset} minutes`)
     }
 
     console.log(`Final show-up time offset: ${showUpOffset} minutes`)
@@ -438,14 +518,22 @@ export function processScheduleData(data: any[]): ScheduleData {
           )
         }
 
-        // Calculate show-up time based on the staggered time
+        // Calculate show-up time based on the staggered time - ONLY for Spallina trucks (SMI/SPA)
         let driverShowUpTime = ""
         if (staggeredTime) {
-          // Ensure we're using the correct offset from the CSV
-          driverShowUpTime = addMinutesToTimeString(staggeredTime, -showUpOffset)
-          console.log(
-            `Driver ${driver}: Show-up time = ${driverShowUpTime} (${showUpOffset} minutes before ${staggeredTime})`,
-          )
+          const isSpallinaWithOffset = isSpallinaTruckWithOffset(driver)
+
+          if (isSpallinaWithOffset) {
+            // Spallina truck (SMI/SPA): apply offset from column O (or default 15 minutes)
+            driverShowUpTime = addMinutesToTimeString(staggeredTime, -showUpOffset)
+            console.log(
+              `SPALLINA TRUCK ${driver}: Show-up time = ${driverShowUpTime} (${showUpOffset} minutes before ${staggeredTime})`,
+            )
+          } else {
+            // Contractor/other truck: show-up time = load time (NO OFFSET)
+            driverShowUpTime = staggeredTime
+            console.log(`CONTRACTOR ${driver}: Show-up time = ${driverShowUpTime} (NO OFFSET - EQUAL TO LOAD TIME)`)
+          }
         }
 
         const entry: ScheduleEntry = {
@@ -473,12 +561,7 @@ export function processScheduleData(data: any[]): ScheduleData {
         }
         byTruckType[truckType].push(entry)
 
-        // Add additional logging for ASPHALT entries
-        if (isAsphaltEntry) {
-          console.log(
-            `ASPHALT ENTRY CREATED: ${jobName} - Driver: ${driver}, ShowUpTime: ${driverShowUpTime}, Offset: ${showUpOffset} minutes`,
-          )
-        }
+        console.log(`ENTRY CREATED: ${jobName} - Driver: ${driver}, ShowUpTime: ${driverShowUpTime}`)
       })
     }
     // CASE 2: If we have multiple trucks required but no specific drivers
@@ -497,15 +580,8 @@ export function processScheduleData(data: any[]): ScheduleData {
           )
         }
 
-        // Calculate show-up time based on the staggered time
-        let truckShowUpTime = ""
-        if (staggeredTime) {
-          // Ensure we're using the correct offset from the CSV
-          truckShowUpTime = addMinutesToTimeString(staggeredTime, -showUpOffset)
-          console.log(
-            `Truck ${i + 1}: Show-up time = ${truckShowUpTime} (${showUpOffset} minutes before ${staggeredTime})`,
-          )
-        }
+        // Calculate show-up time - for TBD trucks, use load time (no offset)
+        const truckShowUpTime = staggeredTime // TBD trucks are treated as contractors
 
         const entry: ScheduleEntry = {
           jobName,
@@ -532,25 +608,15 @@ export function processScheduleData(data: any[]): ScheduleData {
         }
         byTruckType[truckType].push(entry)
 
-        // Add additional logging for ASPHALT entries
-        if (isAsphaltEntry) {
-          console.log(
-            `ASPHALT ENTRY CREATED: ${jobName} - Truck ${i + 1}, ShowUpTime: ${truckShowUpTime}, Offset: ${showUpOffset} minutes`,
-          )
-        }
+        console.log(`ENTRY CREATED: ${jobName} - Truck ${i + 1}, ShowUpTime: ${truckShowUpTime}`)
       }
     }
     // CASE 3: Single entry (default case)
     else {
       console.log(`Creating a single entry (default case)`)
 
-      // Calculate show-up time based on offset
-      let singleShowUpTime = ""
-      if (formattedBaseTime) {
-        // Ensure we're using the correct offset from the CSV
-        singleShowUpTime = addMinutesToTimeString(formattedBaseTime, -showUpOffset)
-        console.log(`Show-up time = ${singleShowUpTime} (${showUpOffset} minutes before ${formattedBaseTime})`)
-      }
+      // Calculate show-up time - for TBD trucks, use load time (no offset)
+      const singleShowUpTime = formattedBaseTime // TBD trucks are treated as contractors
 
       const entry: ScheduleEntry = {
         jobName,
@@ -577,19 +643,14 @@ export function processScheduleData(data: any[]): ScheduleData {
       }
       byTruckType[truckType].push(entry)
 
-      // Add additional logging for ASPHALT entries
-      if (isAsphaltEntry) {
-        console.log(
-          `ASPHALT ENTRY CREATED: ${jobName} - Single entry, ShowUpTime: ${singleShowUpTime}, Offset: ${showUpOffset} minutes`,
-        )
-      }
+      console.log(`ENTRY CREATED: ${jobName} - Single entry, ShowUpTime: ${singleShowUpTime}`)
     }
   })
 
   // Assign missing pit locations based on material types
   const entriesWithPits = assignMissingPitLocations(allEntries)
 
-  // At the end of the function, before returning the data, filter out incomplete entries
+  // FIXED: Don't filter out entries with assigned drivers - only filter out truly incomplete entries
   const isEntryComplete = (entry: ScheduleEntry): boolean => {
     // Check for all essential fields that make a valid schedule entry
     const hasJobName = !!entry.jobName?.trim()
@@ -599,13 +660,13 @@ export function processScheduleData(data: any[]): ScheduleData {
     const hasTime = !!(entry.time?.trim() || entry.showUpTime?.trim())
     const hasTruckType = !!entry.truckType?.trim()
 
-    // Check if driver is assigned (not TBD)
-    const hasValidDriver = entry.truckDriver && entry.truckDriver !== "TBD"
+    // FIXED: Don't require a valid driver - TBD is acceptable
+    // We want to show ALL entries, including those with TBD drivers
 
-    return hasJobName && hasLocation && hasQuantity && hasMaterials && hasTime && hasTruckType && hasValidDriver
+    return hasJobName && hasLocation && hasQuantity && hasMaterials && hasTime && hasTruckType
   }
 
-  // Filter out incomplete entries
+  // Filter out only truly incomplete entries (missing essential data)
   const completeEntries = entriesWithPits.filter(isEntryComplete)
 
   // Update byTruckType to only include complete entries

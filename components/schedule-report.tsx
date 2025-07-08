@@ -1,25 +1,15 @@
 "use client"
-
-import type React from "react"
-
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import type { ScheduleData, ScheduleEntry, TruckType } from "@/types/schedule"
-import { Edit, Save, X, Trash2, Copy, Plus, Printer, FileDown } from "lucide-react"
+import { Save, Trash2, Copy, Plus, Download, Printer } from "lucide-react"
 import { Input } from "@/components/ui/input"
-import { format, parse, isValid } from "date-fns"
-import { TruckDisplay } from "@/components/truck-display"
-import { Badge } from "@/components/ui/badge"
-import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { TruckSelector } from "@/components/truck-selector"
 import { TimeAdjuster } from "@/components/time-adjuster"
 import { addMinutesToTimeString, convertTo24HourFormat } from "@/lib/time-utils"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/components/ui/use-toast"
 import { DriverSummary } from "@/components/driver-summary"
-import { getDriverForTruck } from "@/lib/driver-data"
+import { format, parse, isValid } from "date-fns"
 
 interface ScheduleReportProps {
   data: ScheduleData
@@ -69,46 +59,185 @@ function getTruckTypeColor(type: string): string {
   return truckTypeColors[type]
 }
 
-// Update print colors function to handle dynamic truck types
-function getPrintTruckTypeColor(type: string): string {
-  const colorMap: Record<string, string> = {
-    "Tractor Trailer": "#d1fae5", // green-100
-    Trailer: "#d1fae5", // Same as Tractor Trailer
-    "Dump Truck": "#ffedd5", // orange-100
-    Triaxle: "#ffedd5", // Same as Dump Truck
-    Slinger: "#fef9c3", // yellow-100
-    "6 Wheeler": "#dbeafe", // blue-100
-    "Standard Mixer": "#f3e8ff", // purple-100
-    Mixer: "#f3e8ff", // Same as Standard Mixer
-    Conveyor: "#ccfbf1", // teal-100
-    Undefined: "#f3f4f6", // gray-100
-    ASPHALT: "#fbcfe8", // pink-100
+// SPALLINA trucks (both SMI and SPA prefixes) that get offset - all others are contractors with show-up time = load time
+// TO ADD NEW TRUCKS: Add them to this array following the same pattern
+const SPALLINA_TRUCKS_WITH_OFFSET = [
+  // SMI trucks
+  "SMI106",
+  "SMI107",
+  "SMI108",
+  "SMI110",
+  "SMI111",
+  "SMI112",
+  "SMI114",
+  "SMI36",
+  "SMI38",
+  "SMI40",
+  "SMI41",
+  "SMI42",
+  "SMI43",
+  "SMI43P", // SMI43 PUP
+  "SMI43 PUP",
+  "SMI46",
+  "SMI48",
+  "SMI48P", // SMI48 PUP
+  "SMI48 PUP",
+  "SMI49",
+  "SMI49P", // SMI49 PUP
+  "SMI49 PUP",
+  "SMI50",
+  "SMI50P", // SMI50 PUP
+  "SMI50 PUP",
+  "SMI51",
+  "SMI67",
+  "SMI68",
+  "SMI69",
+  "SMI70",
+  "SMI71",
+  "SMI72",
+  "SMI78",
+  "SMI85",
+  "SMI88",
+  "SMI92",
+  "SMI92S",
+  "SMI94",
+  "SMI94S",
+  "SMI95",
+  "SMI95S",
+  "SMI96",
+  "SMI96S",
+  "SMI97",
+  "SMI97S",
+  // MMH trucks (Spallina fleet) - FIXED
+  "MMH06",
+  "MMH6",
+  "MMH08",
+  "MMH8",
+  // SPA trucks (same numbers, different prefix) - FIXED: INCLUDING SPA33
+  "SPA106",
+  "SPA107",
+  "SPA108",
+  "SPA110",
+  "SPA111",
+  "SPA112",
+  "SPA114",
+  "SPA33", // ✅ SPA33 is now included as a Spallina truck
+  "SPA36",
+  "SPA38",
+  "SPA40",
+  "SPA41",
+  "SPA42",
+  "SPA43",
+  "SPA43 PUP",
+  "SPA46",
+  "SPA48",
+  "SPA48 PUP",
+  "SPA49",
+  "SPA49 PUP",
+  "SPA50",
+  "SPA50 PUP",
+  "SPA51",
+  "SPA67",
+  "SPA68",
+  "SPA69",
+  "SPA70",
+  "SPA71",
+  "SPA72",
+  "SPA78",
+  "SPA85",
+  "SPA88",
+  "SPA92",
+  "SPA92S",
+  "SPA94",
+  "SPA94S",
+  "SPA95",
+  "SPA95S",
+  "SPA96",
+  "SPA96S",
+  "SPA97",
+  "SPA97S",
+]
+
+// Function to check if a truck should get offset (is a specific Spallina truck)
+function isSpallinaTruckWithOffset(truckDriver: string): boolean {
+  if (!truckDriver || truckDriver.trim() === "" || truckDriver === "TBD") {
+    return false
   }
 
-  // Additional print colors for dynamic truck types
-  const additionalPrintColors = [
-    "#fee2e2", // red-100
-    "#fce7f3", // pink-100
-    "#e0e7ff", // indigo-100",
-    "#ccfbf1", // teal-100
-    "#cffafe", // cyan-100
-    "#ecfccb", // lime-100
-    "#fef3c7", // amber-100
-    "#d1fae5", // emerald-100
-    "#f5d0fe", // fuchsia-100
-    "#ffe4e6", // rose-100
+  // Clean the truck name (remove asterisk, trim whitespace)
+  const cleanName = truckDriver.replace(/^\*/, "").trim()
+
+  // Check if it's in the specific Spallina trucks list - case insensitive
+  const isInSpallinaList = SPALLINA_TRUCKS_WITH_OFFSET.some((spallinaTruck) => {
+    const upperCleanName = cleanName.toUpperCase()
+    const upperSpallinaTruck = spallinaTruck.toUpperCase()
+
+    return (
+      upperCleanName === upperSpallinaTruck ||
+      upperCleanName === upperSpallinaTruck.replace(/P$/, " PUP") ||
+      (spallinaTruck.includes("MMH") && (upperCleanName === "MMH6" || upperCleanName === "MMH06")) ||
+      (spallinaTruck.includes("MMH") && (upperCleanName === "MMH8" || upperCleanName === "MMH08"))
+    )
+  })
+
+  console.log(
+    `🚛 Checking truck "${truckDriver}" (clean: "${cleanName}"): ${
+      isInSpallinaList ? "✅ SPALLINA TRUCK WITH OFFSET" : "❌ CONTRACTOR/OTHER - NO OFFSET (show-up = load time)"
+    }`,
+  )
+
+  return isInSpallinaList
+}
+
+// Function to check if a truck is a contractor (specific contractor trucks only)
+function isContractorTruck(truckDriver: string): boolean {
+  if (!truckDriver || truckDriver.trim() === "" || truckDriver === "TBD") {
+    return false
+  }
+
+  // FIRST: Check if it's a Spallina truck - if so, it's NOT a contractor
+  if (isSpallinaTruckWithOffset(truckDriver)) {
+    return false
+  }
+
+  // Clean the truck name (remove asterisk, trim whitespace)
+  const cleanName = truckDriver.replace(/^\*/, "").trim().toUpperCase()
+
+  // Specific contractor trucks (exact matches only)
+  const contractorTrucks = [
+    "WAT44",
+    "WAT48",
+    "MAT51",
+    "NCHFB",
+    "SNOWFLAKE",
+    "SNOW2",
+    "SNOW3",
+    "SNOW4",
+    "SNOW5",
+    "SNOW6",
+    "SNOW7",
+    "SICK",
+    "YORK",
+    // Contractor pattern matches
+    "CONTRACTOR1",
+    "CONTRACTOR2",
+    "CONTRACTOR3",
+    "CONTRACTOR4",
+    "CONTRACTOR5",
+    "CONTRACTOR6",
+    "CONTRACTOR7",
+    "CONTRACTOR8",
+    "CONTRACTOR9",
+    "CONTRACTOR10",
+    "CONTRACTOR11",
+    "CONTRACTOR12",
   ]
 
-  if (colorMap[type]) {
-    return colorMap[type]
-  }
+  // Check for exact matches or contractor patterns
+  const isContractor =
+    contractorTrucks.includes(cleanName) || cleanName.startsWith("CONTRACTOR") || cleanName.startsWith("*")
 
-  // If this is a new type, assign it a print color
-  const knownTypes = Object.keys(colorMap).length
-  const colorIndex = knownTypes % additionalPrintColors.length
-  colorMap[type] = additionalPrintColors[colorIndex]
-
-  return colorMap[type]
+  return isContractor
 }
 
 // Create a blank entry template
@@ -129,21 +258,19 @@ function createBlankEntry(truckType: string): ScheduleEntry {
   }
 }
 
-// Function to check if an entry is complete (has all required fields)
-function isEntryComplete(entry: ScheduleEntry): boolean {
-  // Check for all essential fields that make a valid schedule entry
-  const hasJobName = !!entry.jobName?.trim()
-  const hasLocation = !!entry.location?.trim()
-  const hasQuantity = !!entry.qty?.trim()
-  const hasMaterials = !!entry.materials?.trim()
-  const hasTime = !!(entry.time?.trim() || entry.showUpTime?.trim())
-  const hasTruckType = !!entry.truckType?.trim()
+// Function to sort entries chronologically by LOAD TIME (not start time)
+function sortEntriesChronologically(entries: ScheduleEntry[]): ScheduleEntry[] {
+  return entries.sort((a, b) => {
+    // Sort by LOAD TIME (time field), not show-up time
+    const timeA = convertTo24HourFormat(a.time || "")
+    const timeB = convertTo24HourFormat(b.time || "")
 
-  // Check if driver is assigned (not TBD)
-  const hasValidDriver = entry.truckDriver && entry.truckDriver !== "TBD"
+    if (!timeA && !timeB) return 0
+    if (!timeA) return 1
+    if (!timeB) return -1
 
-  // For a complete entry, all essential fields must be present AND driver must be valid
-  return hasJobName && hasLocation && hasQuantity && hasMaterials && hasTime && hasTruckType && hasValidDriver
+    return timeA.localeCompare(timeB)
+  })
 }
 
 // Function to extract the most common date from entries
@@ -317,98 +444,81 @@ function extractReportDate(data: ScheduleData): Date {
 interface TruckTypeSectionProps {
   type: TruckType
   entries: ScheduleEntry[]
-  editMode: boolean
-  editingEntry: { index: number; type: TruckType } | null
-  onStartEditing: (index: number, type: TruckType) => void
-  onCancelEditing: () => void
   onUpdateEntry: (entry: ScheduleEntry, index: number, type: TruckType) => void
   onDeleteEntry: (index: number, type: TruckType) => void
   onDuplicateEntry: (index: number, type: TruckType) => void
   onAddEntry: (type: TruckType) => void
+  onSaveChanges: () => void
 }
 
 function TruckTypeSection({
   type,
   entries,
-  editMode,
-  editingEntry,
-  onStartEditing,
-  onCancelEditing,
   onUpdateEntry,
   onDeleteEntry,
   onDuplicateEntry,
   onAddEntry,
+  onSaveChanges,
 }: TruckTypeSectionProps) {
-  // Filter out incomplete entries
-  const completeEntries = entries.filter(isEntryComplete)
+  // Sort entries chronologically by LOAD TIME - show ALL entries, not just complete ones
+  const sortedEntries = sortEntriesChronologically(entries)
 
   // Skip rendering if entries are empty
-  if (completeEntries.length === 0) return null
+  if (sortedEntries.length === 0) return null
 
   // Debug logging for entries of this truck type
-  console.log(`TruckTypeSection: ${type} with ${completeEntries.length} entries`)
-  completeEntries.forEach((entry, idx) => {
+  console.log(`TruckTypeSection: ${type} with ${sortedEntries.length} entries`)
+  sortedEntries.forEach((entry, idx) => {
     console.log(
-      `Entry ${idx}: Job=${entry.jobName}, Time=${entry.time}, ShowUpTime=${entry.showUpTime}, Interval=${entry.interval}, Offset=${entry.showUpOffset || "15 (default)"}`,
+      `Entry ${idx}: Job=${entry.jobName}, Time=${entry.time}, ShowUpTime=${entry.showUpTime}, Driver=${entry.truckDriver}, ShowUpOffset=${entry.showUpOffset}`,
     )
-  })
-
-  // Group entries by job name to verify if staggering is working
-  const entriesByJob: Record<string, ScheduleEntry[]> = {}
-  completeEntries.forEach((entry) => {
-    if (!entriesByJob[entry.jobName]) {
-      entriesByJob[entry.jobName] = []
-    }
-    entriesByJob[entry.jobName].push(entry)
-  })
-
-  // Log job groups to check if times are staggered
-  Object.entries(entriesByJob).forEach(([jobName, jobEntries]) => {
-    if (jobEntries.length > 1) {
-      console.log(`Job ${jobName} has ${jobEntries.length} entries:`)
-      jobEntries.forEach((entry, idx) => {
-        console.log(
-          `  Entry ${idx}: Time=${entry.time}, ShowUpTime=${entry.showUpTime}, Offset=${entry.showUpOffset || "15 (default)"}`,
-        )
-      })
-    }
   })
 
   // Get color for this truck type
   const headerColor = getTruckTypeColor(type)
 
+  const handleFieldChange = (index: number, field: keyof ScheduleEntry, value: string) => {
+    const updatedEntry = { ...sortedEntries[index], [field]: value }
+    onUpdateEntry(updatedEntry, index, type)
+  }
+
   return (
-    <div>
-      <div className="flex justify-between items-center mb-4">
-        <h3 className={`text-xl font-bold p-2 rounded ${headerColor}`}>{type}</h3>
-        {editMode && (
-          <Button variant="outline" size="sm" onClick={() => onAddEntry(type)} className="flex items-center gap-1">
-            <Plus className="h-4 w-4" />
-            Add Entry
-          </Button>
-        )}
+    <div className="mb-8 print:mb-0 truck-section">
+      <div className="flex justify-between items-center mb-4 print:mb-2">
+        <h3 className={`text-lg p-2 rounded print:text-base print:p-1 truck-header ${headerColor}`}>{type} Schedule</h3>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onAddEntry(type)}
+          className="flex items-center gap-1 print:hidden"
+        >
+          <Plus className="h-4 w-4" />
+          Add Entry
+        </Button>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse">
+        <table className="w-full border-collapse border border-gray-300 print:text-sm table-fixed">
           <thead>
-            <tr className="bg-muted">
-              <th className="p-2 text-left border">Task Name</th>
-              <th className="p-2 text-left border">Show-up Time</th>
-              <th className="p-2 text-left border">Load Time</th>
-              <th className="p-2 text-left border">Location</th>
-              <th className="p-2 text-left border">Driver</th>
-              <th className="p-2 text-left border">Materials</th>
-              <th className="p-2 text-left border">Pit Location</th>
-              <th className="p-2 text-left border">Quantity</th>
-              <th className="p-2 text-left border"># Trucks</th>
-              <th className="p-2 text-left border w-[20%]">Notes</th>
-              {editMode && <th className="p-2 text-left border">Actions</th>}
+            <tr className="bg-muted print:bg-gray-100">
+              <th className="p-2 text-left border border-gray-300 print:p-1 text-sm w-[200px]">Job Name</th>
+              <th className="p-2 text-left border border-gray-300 print:p-1 text-sm w-[100px] time-column">
+                Start Time
+              </th>
+              <th className="p-2 text-left border border-gray-300 print:p-1 text-sm w-[100px] time-column">
+                Load Time
+              </th>
+              <th className="p-2 text-left border border-gray-300 print:p-1 text-sm w-[180px]">Location</th>
+              <th className="p-2 text-left border border-gray-300 print:p-1 text-sm w-[120px] driver-column">Driver</th>
+              <th className="p-2 text-left border border-gray-300 print:p-1 text-sm w-[140px]">Materials</th>
+              <th className="p-2 text-left border border-gray-300 print:p-1 text-sm w-[120px]">Pit Location</th>
+              <th className="p-2 text-left border border-gray-300 print:p-1 text-sm w-[100px]">Quantity</th>
+              <th className="p-2 text-left border border-gray-300 print:p-1 text-sm w-[80px]"># Trucks</th>
+              <th className="p-2 text-left border border-gray-300 print:p-1 text-sm w-[200px]">Notes</th>
+              <th className="p-2 text-left border border-gray-300 print:hidden text-sm w-[100px]">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {completeEntries.map((entry, index) => {
-              const isEditing = editingEntry?.index === index && editingEntry?.type === type
-
+            {sortedEntries.map((entry, index) => {
               // Extract time from date if time is not available
               let displayTime = entry.time
               if (!displayTime && entry.date) {
@@ -418,126 +528,159 @@ function TruckTypeSection({
                 }
               }
 
-              // Get the show-up time, ensuring we use the correct offset
+              // Calculate show-up time based on whether truck is Spallina with offset
               let showUpTime = entry.showUpTime || ""
 
-              // If show-up time is not available but we have a load time, calculate it
-              // using the specific offset for this entry
+              // If show-up time is not manually set and we have a load time, calculate it
               if (!showUpTime && displayTime) {
-                // Get the specific offset for this entry, defaulting to 15 if not specified
-                const offset = entry.showUpOffset ? Number.parseInt(entry.showUpOffset, 10) : 15
+                const isSpallinaWithOffset = isSpallinaTruckWithOffset(entry.truckDriver)
 
-                // Check if this is an ASPHALT entry (case-insensitive check)
-                const normalizedTruckType = entry.truckType.toUpperCase().trim().replace(/\s+/g, " ")
-                const isAsphaltEntry =
-                  normalizedTruckType === "ASPHALT" ||
-                  normalizedTruckType === "ASPHALT TRUCK" ||
-                  normalizedTruckType.includes("ASPHALT")
-                console.log(
-                  `ASPHALT CHECK in UI - Entry: ${entry.jobName}, Type: "${entry.truckType}", Normalized: "${normalizedTruckType}", Is ASPHALT? ${isAsphaltEntry}`,
-                )
-
-                // Log for debugging, especially for ASPHALT entries
-                console.log(
-                  `Entry ${entry.jobName} (${entry.truckDriver}): Using offset: ${offset} minutes (from CSV: ${entry.showUpOffset || "not specified"})${isAsphaltEntry ? " - ASPHALT ENTRY" : ""}`,
-                )
-
-                // Convert display time to 24-hour format first
-                const formattedTime = convertTo24HourFormat(displayTime)
-                if (formattedTime && formattedTime !== displayTime) {
-                  showUpTime = addMinutesToTimeString(formattedTime, -offset)
-                  console.log(
-                    `Entry ${entry.jobName} (${entry.truckDriver}): Calculated show-up time = ${showUpTime} (${offset} minutes before ${formattedTime})${isAsphaltEntry ? " - ASPHALT ENTRY" : ""}`,
-                  )
+                if (isSpallinaWithOffset) {
+                  // Spallina truck with offset: apply the specific offset from showUpOffset field
+                  const offset = entry.showUpOffset ? Number.parseInt(entry.showUpOffset, 10) : 15
+                  const formattedTime = convertTo24HourFormat(displayTime)
+                  if (formattedTime) {
+                    showUpTime = addMinutesToTimeString(formattedTime, -offset)
+                    console.log(
+                      `⏰ SPALLINA TRUCK ${entry.truckDriver}: Load=${formattedTime} → Show-up=${showUpTime} (${offset}min offset)`,
+                    )
+                  }
                 } else {
-                  showUpTime = "N/A"
+                  // Contractor/other truck: show-up time = load time (NO OFFSET)
+                  showUpTime = convertTo24HourFormat(displayTime) || displayTime
+                  console.log(
+                    `⏰ CONTRACTOR ${entry.truckDriver}: Load=${displayTime} → Show-up=${showUpTime} (NO OFFSET - EQUAL TIMES)`,
+                  )
                 }
-              }
-
-              // If still no show-up time, display N/A
-              if (!showUpTime) showUpTime = "N/A"
-
-              // Log the calculated times for debugging
-              console.log(
-                `Entry ${entry.jobName} (${entry.truckDriver}): Load=${displayTime}, ShowUp=${showUpTime}, Offset=${entry.showUpOffset || "15 (default)"}`,
-              )
-
-              if (isEditing) {
-                return (
-                  <EditableRow
-                    key={`${entry.jobName}-${entry.truckDriver}-${index}-edit`}
-                    entry={{ ...entry, time: displayTime || entry.time, showUpTime }}
-                    index={index}
-                    type={type}
-                    onCancel={onCancelEditing}
-                    onSave={onUpdateEntry}
-                  />
-                )
               }
 
               return (
                 <tr
                   key={`${entry.jobName}-${entry.truckDriver}-${index}`}
-                  className={index % 2 === 0 ? "bg-background" : "bg-muted/30"}
+                  className={`${index % 2 === 0 ? "bg-background" : "bg-muted/30"} print:bg-transparent`}
                 >
-                  <td className="p-2 border">
-                    <div className="flex items-center">
-                      <span>{entry.jobName}</span>
+                  <td className="p-2 border border-gray-300 print:p-1">
+                    <div className="space-y-1">
+                      <Textarea
+                        value={entry.jobName || ""}
+                        onChange={(e) => handleFieldChange(index, "jobName", e.target.value)}
+                        className="min-h-[60px] resize-none border-none bg-transparent p-1 print:border-none print:bg-transparent text-sm"
+                        placeholder="Job name"
+                        rows={3}
+                      />
                       {entry.shift && (
-                        <Badge variant="outline" className="ml-2 text-xs">
-                          {entry.shift}
-                        </Badge>
+                        <Input
+                          value={entry.shift || ""}
+                          onChange={(e) => handleFieldChange(index, "shift", e.target.value)}
+                          className="h-6 border-none bg-transparent p-1 print:border-none print:bg-transparent text-xs"
+                          placeholder="Shift"
+                        />
                       )}
                     </div>
                   </td>
-                  <td className="p-2 border">{convertTo24HourFormat(showUpTime)}</td>
-                  <td className="p-2 border">{convertTo24HourFormat(displayTime)}</td>
-                  <td className="p-2 border">{entry.location}</td>
-                  <td className="p-2 border">
-                    {entry.truckDriver === "SMI-FIRST RETURNING TRUCK" ? (
-                      <div className="flex flex-col">
-                        <span className="font-medium text-amber-600">FIRST RETURNING TRUCK</span>
-                        <span className="text-xs text-amber-700">Any available truck</span>
-                      </div>
-                    ) : /^(SMI)?\d+[Ps]?$/i.test(entry.truckDriver) ? (
-                      <TruckDisplay truckNumber={entry.truckDriver} showType={true} />
-                    ) : (
-                      <span className="font-medium">{entry.truckDriver}</span>
-                    )}
+                  <td className="p-2 border border-gray-300 font-mono print:p-1 w-[100px] time-column">
+                    <TimeAdjuster
+                      value={convertTo24HourFormat(showUpTime) || ""}
+                      onChange={(value) => handleFieldChange(index, "showUpTime", value)}
+                      className="w-full h-8 border-none bg-transparent p-1 print:border-none print:bg-transparent text-sm font-mono"
+                      placeholder="HH:MM"
+                      step={5}
+                    />
                   </td>
-                  <td className="p-2 border">{entry.materials}</td>
-                  <td className="p-2 border">{entry.pit}</td>
-                  <td className="p-2 border">{entry.qty}</td>
-                  <td className="p-2 border">{entry.numTrucks || "1"}</td>
-                  <td className="p-2 border">
-                    <div className="whitespace-pre-wrap break-words max-w-full">{entry.notes}</div>
+                  <td className="p-2 border border-gray-300 font-mono print:p-1 w-[100px] time-column">
+                    <TimeAdjuster
+                      value={convertTo24HourFormat(displayTime) || ""}
+                      onChange={(value) => handleFieldChange(index, "time", value)}
+                      className="w-full h-8 border-none bg-transparent p-1 print:border-none print:bg-transparent text-sm font-mono"
+                      placeholder="HH:MM"
+                      step={5}
+                    />
                   </td>
-                  {editMode && (
-                    <td className="p-2 border">
-                      <div className="flex gap-1">
-                        <Button variant="ghost" size="sm" onClick={() => onStartEditing(index, type)} title="Edit">
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => onDuplicateEntry(index, type)}
-                          title="Duplicate"
-                        >
-                          <Copy className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => onDeleteEntry(index, type)}
-                          title="Delete"
-                          className="text-destructive hover:text-destructive/90"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </td>
-                  )}
+                  <td className="p-2 border border-gray-300 print:p-1">
+                    <Textarea
+                      value={entry.location || ""}
+                      onChange={(e) => handleFieldChange(index, "location", e.target.value)}
+                      className="min-h-[60px] resize-none border-none bg-transparent p-1 print:border-none print:bg-transparent text-sm"
+                      placeholder="Location"
+                      rows={3}
+                    />
+                  </td>
+                  <td className="p-2 border border-gray-300 print:p-1 w-[120px] driver-column">
+                    <Input
+                      value={isContractorTruck(entry.truckDriver) ? `*${entry.truckDriver}` : entry.truckDriver || ""}
+                      onChange={(e) => {
+                        // Remove asterisk when editing
+                        const value = e.target.value.replace(/^\*/, "")
+                        handleFieldChange(index, "truckDriver", value)
+                      }}
+                      className="w-full h-8 border-none bg-transparent p-1 print:border-none print:bg-transparent text-sm"
+                      placeholder="Driver/Truck"
+                    />
+                  </td>
+                  <td className="p-2 border border-gray-300 print:p-1 w-[140px]">
+                    <Input
+                      value={entry.materials || ""}
+                      onChange={(e) => handleFieldChange(index, "materials", e.target.value)}
+                      className="w-full h-8 border-none bg-transparent p-1 print:border-none print:bg-transparent text-sm"
+                      placeholder="Materials"
+                    />
+                  </td>
+                  <td className="p-2 border border-gray-300 print:p-1 w-[120px]">
+                    <Input
+                      value={entry.pit || ""}
+                      onChange={(e) => handleFieldChange(index, "pit", e.target.value)}
+                      className="w-full h-8 border-none bg-transparent p-1 print:border-none print:bg-transparent text-sm"
+                      placeholder="Pit"
+                    />
+                  </td>
+                  <td className="p-2 border border-gray-300 print:p-1 w-[100px]">
+                    <Input
+                      value={entry.qty || ""}
+                      onChange={(e) => handleFieldChange(index, "qty", e.target.value)}
+                      className="w-full h-8 border-none bg-transparent p-1 print:border-none print:bg-transparent text-sm"
+                      placeholder="Qty"
+                    />
+                  </td>
+                  <td className="p-2 border border-gray-300 print:p-1">
+                    <Input
+                      value={entry.numTrucks || "1"}
+                      onChange={(e) => handleFieldChange(index, "numTrucks", e.target.value)}
+                      className="h-8 border-none bg-transparent p-1 print:border-none print:bg-transparent text-sm"
+                      type="number"
+                      min="1"
+                    />
+                  </td>
+                  <td className="p-2 border border-gray-300 print:p-1 w-[200px]">
+                    <Textarea
+                      value={entry.notes || ""}
+                      onChange={(e) => handleFieldChange(index, "notes", e.target.value)}
+                      className="min-h-[60px] resize-none border-none bg-transparent p-1 print:border-none print:bg-transparent text-sm"
+                      placeholder="Notes"
+                      rows={3}
+                    />
+                  </td>
+                  <td className="p-2 border border-gray-300 print:hidden">
+                    <div className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onDuplicateEntry(index, type)}
+                        className="h-8 w-8 p-0"
+                        title="Duplicate entry"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onDeleteEntry(index, type)}
+                        className="h-8 w-8 p-0 text-red-600 hover:text-red-700"
+                        title="Delete entry"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </td>
                 </tr>
               )
             })}
@@ -548,913 +691,354 @@ function TruckTypeSection({
   )
 }
 
-interface EditableRowProps {
-  entry: ScheduleEntry
-  index: number
-  type: TruckType
-  onCancel: () => void
-  onSave: (entry: ScheduleEntry, index: number, type: TruckType) => void
-}
-
-// Define time offset options
-const TIME_OFFSET_OPTIONS = [
-  { value: "10", label: "10 minutes" },
-  { value: "15", label: "15 minutes" },
-  { value: "20", label: "20 minutes" },
-  { value: "30", label: "30 minutes" },
-  { value: "45", label: "45 minutes" },
-  { value: "60", label: "1 hour" },
-  { value: "90", label: "1.5 hours" },
-  { value: "120", label: "2 hours" },
-]
-
-function EditableRow({ entry, index, type, onCancel, onSave }: EditableRowProps) {
-  const [editedEntry, setEditedEntry] = useState<ScheduleEntry>({ ...entry })
-  const [showUpOffset, setShowUpOffset] = useState<string>(entry.showUpOffset || "15") // Default to 15 minutes if not specified
-
-  const handleChange = (field: keyof ScheduleEntry, value: string) => {
-    setEditedEntry((prev) => ({
-      ...prev,
-      [field]: value,
-    }))
-  }
-
-  // Handle show-up time change - updates load time based on offset
-  const handleShowUpTimeChange = (value: string) => {
-    handleChange("showUpTime", value)
-
-    // If show-up time changes, update load time based on the offset
-    if (value && /^\d{1,2}:\d{2}$/.test(value)) {
-      const offsetMinutes = Number.parseInt(showUpOffset, 10)
-      const newLoadTime = addMinutesToTimeString(value, offsetMinutes)
-      handleChange("time", newLoadTime)
-    }
-  }
-
-  // Handle load time change - updates show-up time based on offset
-  const handleLoadTimeChange = (value: string) => {
-    handleChange("time", value)
-
-    // If load time changes, update show-up time based on the offset
-    if (value && /^\d{1,2}:\d{2}$/.test(value)) {
-      const offsetMinutes = Number.parseInt(showUpOffset, 10)
-      const newShowUpTime = addMinutesToTimeString(value, -offsetMinutes)
-      handleChange("showUpTime", newShowUpTime)
-    }
-  }
-
-  // Handle offset change - recalculates show-up time based on load time
-  const handleOffsetChange = (value: string) => {
-    setShowUpOffset(value)
-    handleChange("showUpOffset", value)
-
-    // Update show-up time based on the new offset
-    if (editedEntry.time && /^\d{1,2}:\d{2}$/.test(editedEntry.time)) {
-      const offsetMinutes = Number.parseInt(value, 10)
-      const newShowUpTime = addMinutesToTimeString(editedEntry.time, -offsetMinutes)
-      handleChange("showUpTime", newShowUpTime)
-    }
-  }
-
-  return (
-    <tr className="bg-primary/5">
-      <td className="p-2 border">
-        <div className="space-y-2">
-          <Input
-            value={editedEntry.jobName}
-            onChange={(e) => handleChange("jobName", e.target.value)}
-            className="h-8"
-            placeholder="Job name"
-          />
-          <div className="flex items-center gap-2">
-            <Label htmlFor="shift" className="text-xs whitespace-nowrap">
-              Shift:
-            </Label>
-            <Select value={editedEntry.shift || ""} onValueChange={(value) => handleChange("shift", value)}>
-              <SelectTrigger className="h-7 text-xs">
-                <SelectValue placeholder="Select shift" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="1st">1st</SelectItem>
-                <SelectItem value="2nd">2nd</SelectItem>
-                <SelectItem value="Scheduled">Scheduled</SelectItem>
-                <SelectItem value="Any">Any</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </td>
-      <td className="p-2 border">
-        <div className="space-y-2">
-          <TimeAdjuster
-            value={editedEntry.showUpTime || ""}
-            onChange={handleShowUpTimeChange}
-            className="h-8"
-            placeholder="HH:MM"
-            step={5}
-          />
-          <div className="flex items-center gap-2">
-            <Label htmlFor="showUpOffset" className="text-xs whitespace-nowrap">
-              Offset:
-            </Label>
-            <Select value={showUpOffset} onValueChange={handleOffsetChange}>
-              <SelectTrigger className="h-7 text-xs">
-                <SelectValue placeholder="Minutes before" />
-              </SelectTrigger>
-              <SelectContent>
-                {TIME_OFFSET_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </td>
-      <td className="p-2 border">
-        <TimeAdjuster
-          value={editedEntry.time || ""}
-          onChange={handleLoadTimeChange}
-          className="h-8"
-          placeholder="HH:MM"
-          step={5}
-        />
-      </td>
-      <td className="p-2 border">
-        <Input
-          value={editedEntry.location}
-          onChange={(e) => handleChange("location", e.target.value)}
-          className="h-8"
-        />
-      </td>
-      <td className="p-2 border">
-        <div className="space-y-2">
-          <Input
-            value={editedEntry.truckDriver}
-            onChange={(e) => handleChange("truckDriver", e.target.value)}
-            className="h-8"
-            placeholder="Enter truck # or driver name"
-          />
-
-          <TruckSelector truckType={type} onSelectTruck={(truckId) => handleChange("truckDriver", truckId)} />
-        </div>
-      </td>
-      <td className="p-2 border">
-        <Input
-          value={editedEntry.materials}
-          onChange={(e) => handleChange("materials", e.target.value)}
-          className="h-8"
-        />
-      </td>
-      <td className="p-2 border">
-        <Input value={editedEntry.pit} onChange={(e) => handleChange("pit", e.target.value)} className="h-8" />
-      </td>
-      <td className="p-2 border">
-        <Input value={editedEntry.qty} onChange={(e) => handleChange("qty", e.target.value)} className="h-8" />
-      </td>
-      <td className="p-2 border">
-        <Input
-          value={editedEntry.numTrucks || "1"}
-          onChange={(e) => handleChange("numTrucks", e.target.value)}
-          className="h-8"
-          type="number"
-          min="1"
-        />
-      </td>
-      <td className="p-2 border">
-        <Textarea
-          value={editedEntry.notes}
-          onChange={(e) => handleChange("notes", e.target.value)}
-          className="min-h-[60px] text-sm"
-          placeholder="Enter notes"
-        />
-      </td>
-      <td className="p-2 border">
-        <div className="flex gap-1">
-          <Button variant="ghost" size="sm" onClick={() => onSave(editedEntry, index, type)}>
-            <Save className="h-4 w-4" />
-          </Button>
-          <Button variant="ghost" size="sm" onClick={onCancel}>
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
-      </td>
-    </tr>
-  )
-}
-
-export function ScheduleReport({ data: initialData, onUpdateData }: ScheduleReportProps) {
-  const [activeTab, setActiveTab] = useState<string>("all")
-  const [data, setData] = useState<ScheduleData>(initialData)
-  const [editMode, setEditMode] = useState(false)
-  const [editingEntry, setEditingEntry] = useState<{ index: number; type: TruckType } | null>(null)
-  const [dispatcherNotes, setDispatcherNotes] = useState<string>(initialData.dispatcherNotes || "")
-  const [isSaving, setIsSaving] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
-  const [isExporting, setIsExporting] = useState(false)
+export function ScheduleReport({ data, onUpdateData }: ScheduleReportProps) {
+  const [dispatcherNotes, setDispatcherNotes] = useState("")
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false)
   const { toast } = useToast()
 
-  useEffect(() => {
-    console.log("ScheduleReport: Data received:", initialData)
-    setData(initialData)
-    setDispatcherNotes(initialData.dispatcherNotes || "")
-  }, [initialData])
+  // Extract report date from the data
+  const reportDate = extractReportDate(data)
 
-  // Function to group entries by truck type
-  const groupEntriesByType = (entries: ScheduleEntry[]): Record<TruckType, ScheduleEntry[]> => {
-    const grouped: Record<TruckType, ScheduleEntry[]> = {} as Record<TruckType, ScheduleEntry[]>
+  // Sort truck types in desired order
+  const truckTypeOrder = ["ASPHALT", "Dump Truck", "Slinger", "Trailer", "Triaxle", "6 Wheeler", "Mixer", "Conveyor"]
+  const sortedTruckTypes = Object.keys(data.byTruckType || {}).sort((a, b) => {
+    const aIndex = truckTypeOrder.indexOf(a)
+    const bIndex = truckTypeOrder.indexOf(b)
 
-    if (!entries) return grouped
-
-    entries.forEach((entry) => {
-      if (!entry.truckType) {
-        entry.truckType = "Undefined" // Ensure every entry has a truckType
-      }
-      if (!grouped[entry.truckType]) {
-        grouped[entry.truckType] = []
-      }
-      grouped[entry.truckType].push(entry)
-    })
-
-    return grouped
-  }
-
-  // Group entries by truck type
-  const groupedEntries = groupEntriesByType(data.allEntries)
-
-  // Handlers for editing actions
-  const handleStartEditing = (index: number, type: TruckType) => {
-    setEditingEntry({ index, type })
-  }
-
-  const handleCancelEditing = () => {
-    setEditingEntry(null)
-  }
+    if (aIndex !== -1 && bIndex !== -1) {
+      return aIndex - bIndex
+    }
+    if (aIndex !== -1) return -1
+    if (bIndex !== -1) return 1
+    return a.localeCompare(b)
+  })
 
   const handleUpdateEntry = (updatedEntry: ScheduleEntry, index: number, type: TruckType) => {
-    console.log(`Updating entry at index ${index} of type ${type} with`, updatedEntry)
-    const updatedAllEntries = [...data.allEntries]
+    const updatedData = { ...data }
 
-    // Find the actual index in allEntries
-    const actualIndex = data.allEntries.findIndex(
-      (entry) => entry.jobName === updatedEntry.jobName && entry.truckDriver === updatedEntry.truckDriver,
-    )
-
-    if (actualIndex !== -1) {
-      updatedAllEntries[actualIndex] = updatedEntry
-    } else {
-      updatedAllEntries[index] = updatedEntry
+    // Update in byTruckType
+    if (updatedData.byTruckType && updatedData.byTruckType[type]) {
+      updatedData.byTruckType[type][index] = updatedEntry
     }
 
-    const updatedData: ScheduleData = {
-      ...data,
-      allEntries: updatedAllEntries,
-      byTruckType: groupEntriesByType(updatedAllEntries),
+    // Update in allEntries - find by matching original entry
+    if (updatedData.allEntries) {
+      const originalEntry = data.byTruckType?.[type]?.[index]
+      if (originalEntry) {
+        const allEntriesIndex = updatedData.allEntries.findIndex(
+          (entry) =>
+            entry.jobName === originalEntry.jobName &&
+            entry.truckDriver === originalEntry.truckDriver &&
+            entry.time === originalEntry.time,
+        )
+        if (allEntriesIndex !== -1) {
+          updatedData.allEntries[allEntriesIndex] = updatedEntry
+        }
+      }
     }
 
-    setData(updatedData)
     onUpdateData(updatedData)
-    setEditingEntry(null)
-
-    toast({
-      title: "Entry updated",
-      description: "The schedule entry has been successfully updated.",
-    })
   }
 
   const handleDeleteEntry = (index: number, type: TruckType) => {
-    console.log(`Deleting entry at index ${index} of type ${type}`)
-    const updatedAllEntries = data.allEntries.filter((_, i) => i !== index)
+    const updatedData = { ...data }
 
-    const updatedData: ScheduleData = {
-      ...data,
-      allEntries: updatedAllEntries,
-      byTruckType: groupEntriesByType(updatedAllEntries),
+    // Remove from byTruckType
+    if (updatedData.byTruckType && updatedData.byTruckType[type]) {
+      const entryToDelete = updatedData.byTruckType[type][index]
+      updatedData.byTruckType[type].splice(index, 1)
+
+      // Remove from allEntries
+      if (updatedData.allEntries && entryToDelete) {
+        updatedData.allEntries = updatedData.allEntries.filter(
+          (entry) => !(entry.jobName === entryToDelete.jobName && entry.truckDriver === entryToDelete.truckDriver),
+        )
+      }
     }
 
-    setData(updatedData)
     onUpdateData(updatedData)
-
     toast({
       title: "Entry deleted",
-      description: "The schedule entry has been successfully deleted.",
+      description: "The schedule entry has been removed.",
     })
   }
 
   const handleDuplicateEntry = (index: number, type: TruckType) => {
-    console.log(`Duplicating entry at index ${index} of type ${type}`)
-    const entryToDuplicate = data.allEntries[index]
-    const duplicatedEntry = { ...entryToDuplicate } // Create a shallow copy
+    const updatedData = { ...data }
 
-    const updatedAllEntries = [...data.allEntries]
-    updatedAllEntries.splice(index + 1, 0, duplicatedEntry) // Insert after the original
+    if (updatedData.byTruckType && updatedData.byTruckType[type]) {
+      const originalEntry = updatedData.byTruckType[type][index]
+      const duplicatedEntry = {
+        ...originalEntry,
+        jobName: `${originalEntry.jobName} (Copy)`,
+        truckDriver: "TBD",
+      }
 
-    const updatedData: ScheduleData = {
-      ...data,
-      allEntries: updatedAllEntries,
-      byTruckType: groupEntriesByType(updatedAllEntries),
+      // Add to byTruckType
+      updatedData.byTruckType[type].push(duplicatedEntry)
+
+      // Add to allEntries
+      if (updatedData.allEntries) {
+        updatedData.allEntries.push(duplicatedEntry)
+      }
     }
 
-    setData(updatedData)
     onUpdateData(updatedData)
-
     toast({
       title: "Entry duplicated",
-      description: "The schedule entry has been successfully duplicated.",
+      description: "A copy of the entry has been created.",
     })
   }
 
   const handleAddEntry = (type: TruckType) => {
-    console.log(`Adding new entry of type ${type}`)
+    const updatedData = { ...data }
     const newEntry = createBlankEntry(type)
-    const updatedAllEntries = [...data.allEntries, newEntry]
 
-    const updatedData: ScheduleData = {
-      ...data,
-      allEntries: updatedAllEntries,
-      byTruckType: groupEntriesByType(updatedAllEntries),
+    // Add to byTruckType
+    if (!updatedData.byTruckType) {
+      updatedData.byTruckType = {}
     }
+    if (!updatedData.byTruckType[type]) {
+      updatedData.byTruckType[type] = []
+    }
+    updatedData.byTruckType[type].push(newEntry)
 
-    setData(updatedData)
+    // Add to allEntries
+    if (!updatedData.allEntries) {
+      updatedData.allEntries = []
+    }
+    updatedData.allEntries.push(newEntry)
+
     onUpdateData(updatedData)
-
     toast({
-      title: "New entry added",
-      description: `A new entry for ${type} has been added.`,
+      title: "Entry added",
+      description: `A new ${type} entry has been created.`,
     })
   }
 
-  const handleNotesChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const newNotes = e.target.value
-    setDispatcherNotes(newNotes)
-
-    // Update the data object immediately
-    const updatedData: ScheduleData = {
-      ...data,
-      dispatcherNotes: newNotes,
-    }
-
-    setData(updatedData)
-    onUpdateData(updatedData) // Optimistically update the parent component
-  }
-
-  const handleToggleEditMode = () => {
-    setEditMode(!editMode)
-    if (editMode) {
-      setEditingEntry(null) // Cancel any active editing
-    }
-  }
-
-  // Handle driver name updates
-  const handleUpdateDriverName = (oldName: string, newName: string) => {
-    console.log(`Updating driver name from ${oldName} to ${newName}`)
-
-    // Update all entries with this driver name
-    const updatedAllEntries = data.allEntries.map((entry) => {
-      if (entry.truckDriver === oldName) {
-        return { ...entry, truckDriver: newName }
-      }
-      return entry
-    })
-
-    const updatedData: ScheduleData = {
-      ...data,
-      allEntries: updatedAllEntries,
-      byTruckType: groupEntriesByType(updatedAllEntries),
-    }
-
-    setData(updatedData)
-    onUpdateData(updatedData)
-
+  const handleSaveChanges = () => {
+    // This would typically save to a backend or local storage
     toast({
-      title: "Driver name updated",
-      description: `Updated driver name from ${oldName} to ${newName}`,
+      title: "Changes saved",
+      description: "All schedule changes have been saved successfully.",
     })
   }
-
-  // Handle driver time updates
-  const handleUpdateDriverTime = (driverName: string, field: "showUpTime" | "time", newValue: string) => {
-    console.log(`Updating ${field} for driver ${driverName} to ${newValue}`)
-
-    // Update all entries with this driver name
-    const updatedAllEntries = data.allEntries.map((entry) => {
-      if (entry.truckDriver === driverName) {
-        return { ...entry, [field]: newValue }
-      }
-      return entry
-    })
-
-    const updatedData: ScheduleData = {
-      ...data,
-      allEntries: updatedAllEntries,
-      byTruckType: groupEntriesByType(updatedAllEntries),
-    }
-
-    setData(updatedData)
-    onUpdateData(updatedData)
-  }
-
-  // Prepare driver summary data
-  const driverSummary =
-    data.allEntries?.map((entry) => {
-      // Get driver name from truck ID
-      const driverName = entry.truckDriver ? getDriverForTruck(entry.truckDriver)?.name || entry.truckDriver : ""
-
-      return {
-        name: driverName,
-        truckNumber: entry.truckDriver || "",
-        time: entry.showUpTime || entry.time || "",
-      }
-    }) || []
 
   // Handle export to PDF
   const handleExportToPDF = async () => {
     try {
-      setIsExporting(true)
-
-      // Extract the report date
-      const reportDate = extractReportDate(data)
-
-      // Format the date string for filename (no spaces or special chars)
-      const filenameDateString = format(reportDate, "yyyy-MM-dd")
-      const filename = `Spallina-Trucking-Schedule-${filenameDateString}`
-
-      // Import the export function
+      setIsGeneratingPDF(true)
       const { exportToPDF } = await import("@/lib/export-utils")
 
-      // Prepare summary data
-      const summaryData = {
-        unassignedSummary: {} as Record<string, number>,
-        totalUnassigned: 0,
-        totalOrders: data.allEntries?.length || 0,
-      }
+      // Calculate summary data
+      const unassignedSummary: Record<string, number> = {}
+      let totalUnassigned = 0
+      let totalOrders = 0
 
-      // Calculate unassigned entries by truck type
-      const unassignedEntries = data.allEntries?.filter((entry) => entry.truckDriver === "TBD") || []
-      unassignedEntries.forEach((entry) => {
-        const type = entry.truckType || "Undefined"
-        summaryData.unassignedSummary[type] = (summaryData.unassignedSummary[type] || 0) + 1
-        summaryData.totalUnassigned++
-      })
-
-      // Filter out entries with TBD drivers for the export
-      const completeEntries = data.allEntries?.filter((entry) => entry.truckDriver !== "TBD") || []
-
-      // Group complete entries by truck type
-      const groupedCompleteEntries: Record<string, ScheduleEntry[]> = {}
-      completeEntries.forEach((entry) => {
-        const type = entry.truckType || "Undefined"
-        if (!groupedCompleteEntries[type]) {
-          groupedCompleteEntries[type] = []
+      data.allEntries?.forEach((entry) => {
+        totalOrders++
+        if (!entry.truckDriver || entry.truckDriver === "TBD") {
+          totalUnassigned++
+          const type = entry.truckType || "Unknown"
+          unassignedSummary[type] = (unassignedSummary[type] || 0) + 1
         }
-        groupedCompleteEntries[type].push(entry)
       })
 
-      // Prepare data for export
-      const exportData = {
-        allEntries: completeEntries,
-        byTruckType: groupedCompleteEntries,
-        scheduleEntries: completeEntries,
-        dispatcherNotes: dispatcherNotes,
+      const summaryData = {
+        unassignedSummary,
+        totalUnassigned,
+        totalOrders,
       }
 
-      // Prepare driver summary for export (filter out TBD drivers)
-      const exportDriverSummary = driverSummary.filter(
-        (driver) => driver.truckNumber !== "TBD" && driver.name !== "TBD",
-      )
+      const filenameDateString = format(reportDate, "yyyy-MM-dd")
+      const filename = `Spallina-Schedule-${filenameDateString}`
 
-      // Call the export function
-      exportToPDF(exportData, filename, reportDate, summaryData, dispatcherNotes, exportDriverSummary)
+      await exportToPDF(data, filename, reportDate, summaryData, dispatcherNotes, [])
 
       toast({
-        title: "Success",
+        title: "PDF exported successfully",
         description: `Schedule exported as ${filename}.pdf`,
       })
     } catch (error) {
-      console.error("Error exporting to PDF:", error)
+      console.error("Error exporting PDF:", error)
       toast({
-        title: "Error",
-        description: "Failed to export schedule to PDF. Please try again.",
+        title: "Export failed",
+        description: "There was an error exporting the PDF file.",
         variant: "destructive",
       })
     } finally {
-      setIsExporting(false)
+      setIsGeneratingPDF(false)
     }
   }
 
-  // Handle print button click
-  const handlePrint = () => {
-    // Create a new window for printing
-    const printWindow = window.open("", "_blank")
-    if (!printWindow) {
+  // Handle print - now generates PDF and opens it for printing
+  const handlePrint = async () => {
+    try {
+      setIsGeneratingPDF(true)
+      const { exportToPDFForPrint } = await import("@/lib/export-utils")
+
+      // Calculate summary data
+      const unassignedSummary: Record<string, number> = {}
+      let totalUnassigned = 0
+      let totalOrders = 0
+
+      data.allEntries?.forEach((entry) => {
+        totalOrders++
+        if (!entry.truckDriver || entry.truckDriver === "TBD") {
+          totalUnassigned++
+          const type = entry.truckType || "Unknown"
+          unassignedSummary[type] = (unassignedSummary[type] || 0) + 1
+        }
+      })
+
+      const summaryData = {
+        unassignedSummary,
+        totalUnassigned,
+        totalOrders,
+      }
+
+      const filenameDateString = format(reportDate, "yyyy-MM-dd")
+      const filename = `Spallina-Schedule-${filenameDateString}-Print`
+
+      // Generate PDF and open for printing
+      await exportToPDFForPrint(data, filename, reportDate, summaryData, dispatcherNotes, [])
+
       toast({
-        title: "Error",
-        description: "Please allow pop-ups to print the schedule",
+        title: "PDF generated for printing",
+        description: "Opening PDF in new window for printing...",
+      })
+    } catch (error) {
+      console.error("Error generating PDF for print:", error)
+      toast({
+        title: "Print failed",
+        description: "There was an error generating the PDF for printing.",
         variant: "destructive",
       })
-      return
-    }
-
-    // Generate HTML content
-    const html = generateHTML(data, driverSummary)
-
-    // Write the HTML to the new window
-    printWindow.document.open()
-    printWindow.document.write(html)
-    printWindow.document.close()
-
-    // Wait for content to load before printing
-    printWindow.onload = () => {
-      printWindow.print()
+    } finally {
+      setIsGeneratingPDF(false)
     }
   }
 
-  // Generate HTML for printing and PDF export
-  function generateHTML(
-    data: ScheduleData,
-    driverSummary: Array<{ name: string; truckNumber: string; time: string }>,
-  ): string {
-    // Extract the report date from the schedule data
-    const reportDate = extractReportDate(data)
+  // Create driver summary data
+  const driverSummaryEntries =
+    data.allEntries
+      ?.filter((entry) => entry.truckDriver && entry.truckDriver !== "TBD" && entry.truckDriver.trim() !== "")
+      .map((entry) => {
+        // Calculate start time based on whether truck is Spallina with offset
+        let startTime = entry.showUpTime || ""
+        const displayTime = entry.time || ""
 
-    // Format the date string
-    const dateString = format(reportDate, "EEEE, MMMM d, yyyy")
+        if (!startTime && displayTime) {
+          const isSpallinaWithOffset = isSpallinaTruckWithOffset(entry.truckDriver)
 
-    // Spallina Materials logo URL
-    const logoUrl =
-      "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Spallina.jpg-d9YdthrKQ8KKBMjr0z02HOvN9X2W6P.jpeg"
-
-    // Start building HTML
-    let html = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Spallina Materials Trucking Schedule - ${dateString}</title>
-        <style>
-          body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-            font-size: 12px;
-          }
-          .logo-container {
-            text-align: center;
-            margin-bottom: 15px;
-          }
-          .logo {
-            max-width: 350px;
-            height: auto;
-          }
-          h1 {
-            font-size: 24px;
-            margin-bottom: 5px;
-            text-align: center;
-            font-weight: bold;
-          }
-          .date-subheading {
-            font-size: 18px;
-            margin-top: 0;
-            margin-bottom: 20px;
-            text-align: center;
-            font-weight: normal;
-          }
-          h2 {
-            font-size: 16px;
-            margin-top: 20px;
-            margin-bottom: 10px;
-            background-color: #f0f0f0;
-            padding: 5px;
-          }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 20px;
-          }
-          th, td {
-            border: 1px solid #000;
-            padding: 5px;
-            text-align: left;
-          }
-          th {
-            background-color: #f0f0f0;
-          }
-          tr:nth-child(even) {
-            background-color: #f9f9f9;
-          }
-          .print-button {
-            text-align: center;
-            margin-bottom: 20px;
-          }
-          .print-button button {
-            padding: 10px 20px;
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            cursor: pointer;
-          }
-          .page-break {
-            page-break-before: always;
-          }
-          .continued {
-            font-style: italic;
-            font-size: 10px;
-            text-align: right;
-            margin-bottom: 5px;
-          }
-          @media print {
-            .print-button {
-              display: none;
+          if (isSpallinaWithOffset) {
+            // Spallina truck with offset: apply the specific offset from showUpOffset field
+            const offset = entry.showUpOffset ? Number.parseInt(entry.showUpOffset, 10) : 15
+            const formattedTime = convertTo24HourFormat(displayTime)
+            if (formattedTime) {
+              startTime = addMinutesToTimeString(formattedTime, -offset)
             }
-            @page {
-              size: landscape;
-            }
-            thead {
-              display: table-header-group;
-            }
-            tfoot {
-              display: table-footer-group;
-            }
+          } else {
+            // Contractor/other truck: start time = load time (NO OFFSET)
+            startTime = convertTo24HourFormat(displayTime) || displayTime
           }
-        </style>
-      </head>
-      <body>
-        <div class="print-button">
-          <button onclick="window.print()">Print</button>
-        </div>
-        
-        <div class="logo-container">
-          <img src="${logoUrl}" alt="Spallina Materials" class="logo" />
-        </div>
-        
-        <h1>Spallina Materials Trucking Schedule</h1>
-        <p class="date-subheading">${dateString}</p>
-    `
+        }
 
-    // Group entries by truck type
-    const entriesByType = data.byTruckType || {}
-
-    // Sort truck types (matching PDF example order)
-    const truckTypeOrder = [
-      "ASPHALT",
-      "Dump Truck",
-      "Slinger",
-      "Trailer",
-      "Triaxle",
-      "6 Wheeler",
-      "Mixer",
-      "Conveyor",
-      "Contractor",
-    ]
-
-    const sortedTruckTypes = Object.keys(entriesByType).sort((a, b) => {
-      // Custom sort based on predefined order
-      const aIndex = truckTypeOrder.indexOf(a)
-      const bIndex = truckTypeOrder.indexOf(b)
-
-      // If both types are in our predefined list, sort by that order
-      if (aIndex !== -1 && bIndex !== -1) {
-        return aIndex - bIndex
-      }
-
-      // If only one type is in our list, prioritize it
-      if (aIndex !== -1) return -1
-      if (bIndex !== -1) return 1
-
-      // Otherwise sort alphabetically
-      return a.localeCompare(b)
-    })
-
-    // Process each truck type - all on the same page
-    sortedTruckTypes.forEach((truckType, index) => {
-      const entries = entriesByType[truckType] || []
-
-      // Skip if no entries
-      if (entries.length === 0) return
-
-      // Add truck type header
-      html += `<h2>${truckType} Schedule</h2>`
-
-      // Start table
-      html += `
-        <table>
-          <thead>
-            <tr>
-              <th>Job Name</th>
-              <th>Start Time</th>
-              <th>Load Time</th>
-              <th>Location</th>
-              <th>Driver</th>
-              <th>Materials</th>
-              <th>Pit Location</th>
-              <th>Quantity</th>
-              <th># Trucks</th>
-              <th>Notes</th>
-            </tr>
-          </thead>
-          <tbody>
-      `
-
-      // Sort entries by start time
-      entries.sort((a, b) => {
-        const aTime = a.showUpTime || ""
-        const bTime = b.showUpTime || ""
-        return aTime.localeCompare(bTime)
-      })
-
-      // Add entries
-      entries.forEach((entry) => {
-        // Get driver name from truck ID
-        const driverName = entry.truckDriver ? getDriverForTruck(entry.truckDriver)?.name || entry.truckDriver : ""
-
-        html += `
-          <tr>
-            <td>${entry.jobName || ""}</td>
-            <td>${entry.showUpTime || ""}</td>
-            <td>${entry.time || ""}</td>
-            <td>${entry.location || ""}</td>
-            <td>${driverName}</td>
-            <td>${entry.materials || ""}</td>
-            <td>${entry.pit || ""}</td>
-            <td>${entry.qty || ""}</td>
-            <td>${entry.numTrucks || "1"}</td>
-            <td>${entry.notes || ""}</td>
-          </tr>
-        `
-      })
-
-      // Close table
-      html += `
-          </tbody>
-        </table>
-      `
-    })
-
-    // Add driver summary on its own page
-    html += `
-      <div class="page-break"></div>
-      <h1>Spallina Materials Trucking Schedule</h1>
-      <p class="date-subheading">${dateString}</p>
-      <h2>Spallina Drivers Summary</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Driver Name</th>
-            <th>Truck #</th>
-            <th>Show-up Time</th>
-          </tr>
-        </thead>
-        <tbody>
-    `
-
-    // Process all drivers from entries
-    const drivers = new Map()
-
-    data.allEntries?.forEach((entry) => {
-      if (entry.truckDriver && entry.truckDriver !== "TBD") {
-        // Get driver name from truck ID
-        const name = entry.truckDriver ? getDriverForTruck(entry.truckDriver)?.name || entry.truckDriver : ""
-
-        drivers.set(entry.truckDriver, {
-          name: name,
+        return {
+          name: entry.jobName || "",
           truckNumber: entry.truckDriver,
-          time: entry.showUpTime || "",
-        })
-      }
-    })
-
-    // Sort drivers by show-up time
-    const sortedDrivers = Array.from(drivers.values()).sort((a, b) => {
-      if (!a.time) return 1
-      if (!b.time) return -1
-      return a.time.localeCompare(b.time)
-    })
-
-    // Add driver rows
-    sortedDrivers.forEach((driver) => {
-      html += `
-        <tr>
-          <td>${driver.name}</td>
-          <td>${driver.truckNumber}</td>
-          <td>${driver.time}</td>
-        </tr>
-      `
-    })
-
-    // Close driver table
-    html += `
-        </tbody>
-      </table>
-    `
-
-    // Close HTML
-    html += `
-      </body>
-      </html>
-    `
-
-    return html
-  }
-
-  const allTruckTypes = Object.keys(groupedEntries)
-
-  // Render fallback UI if no entries are available
-  if (!data || !data.allEntries || data.allEntries.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center h-48">
-        <h2 className="text-lg font-semibold">No schedule entries found.</h2>
-        <p className="text-muted-foreground">Please add entries to the schedule.</p>
-      </div>
-    )
-  }
+          time: convertTo24HourFormat(startTime) || "",
+        }
+      })
+      .filter((entry) => entry.time) // Only include entries with valid times
+      .sort((a, b) => a.time.localeCompare(b.time)) || []
 
   return (
-    <div className="w-full">
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-2xl font-bold tracking-tight">Schedule Report</h2>
-        <div className="flex gap-2">
+    <div className="space-y-6">
+      {/* Header with buttons (JSON buttons removed) */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 print:hidden">
+        <div>
+          <h2 className="text-2xl font-bold">Schedule Report</h2>
+          <p className="text-muted-foreground">{format(reportDate, "EEEE, MMMM d, yyyy")}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={handleSaveChanges} className="flex items-center gap-2">
+            <Save className="h-4 w-4" />
+            Save Changes
+          </Button>
+          <Button
+            onClick={handlePrint}
+            variant="outline"
+            className="flex items-center gap-2 bg-transparent"
+            disabled={isGeneratingPDF}
+          >
+            <Printer className="h-4 w-4" />
+            {isGeneratingPDF ? "Generating..." : "Print"}
+          </Button>
           <Button
             onClick={handleExportToPDF}
-            className="bg-blue-600 hover:bg-blue-700 text-white"
-            disabled={isExporting}
+            variant="outline"
+            className="flex items-center gap-2 bg-transparent"
+            disabled={isGeneratingPDF}
           >
-            <FileDown className="h-4 w-4 mr-2" />
-            {isExporting ? "Exporting..." : "Export to PDF"}
-          </Button>
-          <Button onClick={handlePrint} variant="outline">
-            <Printer className="h-4 w-4 mr-2" />
-            Print
-          </Button>
-          <Button variant="outline" onClick={handleToggleEditMode}>
-            {editMode ? "View Mode" : "Edit Mode"}
+            <Download className="h-4 w-4" />
+            {isGeneratingPDF ? "Exporting..." : "Export PDF"}
           </Button>
         </div>
       </div>
 
-      {/* Driver Summary Section */}
-      <div className="mb-6">
-        <DriverSummary
-          entries={data.allEntries}
-          onUpdateDriverName={handleUpdateDriverName}
-          onUpdateDriverTime={handleUpdateDriverTime}
-        />
+      {/* Contractor Legend */}
+      <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md print:hidden">
+        <p className="text-sm text-yellow-800">
+          <strong>Note:</strong> Contractors are marked with an asterisk (*). Spallina trucks show up 15 minutes before
+          load time, contractors show up at load time.
+        </p>
       </div>
 
-      <div className="mb-4">
-        <Label htmlFor="dispatcherNotes">Dispatcher Notes:</Label>
-        <Textarea
-          id="dispatcherNotes"
-          value={dispatcherNotes}
-          onChange={handleNotesChange}
-          placeholder="Enter notes for the dispatcher"
-          className="mt-1"
-        />
-      </div>
+      {/* Print-only content wrapper */}
+      <div className="schedule-print-content">
+        {/* Print Header */}
+        <div className="print-header hidden print:block">
+          <h1>Spallina Materials Trucking Schedule</h1>
+          <h2>{format(reportDate, "EEEE, MMMM d, yyyy")}</h2>
+        </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="mb-4">
-          <TabsTrigger value="all">All Truck Types</TabsTrigger>
-          {allTruckTypes.map((type) => (
-            <TabsTrigger key={type} value={type}>
-              {type}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+        {/* Dispatcher Notes */}
+        <div className="mb-6 print:mb-4">
+          <div className="hidden print:block">
+            <h3>DISPATCHER NOTES:</h3>
+            <p>{dispatcherNotes}</p>
+          </div>
+          <Textarea
+            value={dispatcherNotes}
+            onChange={(e) => setDispatcherNotes(e.target.value)}
+            placeholder="Add any special instructions or notes for drivers..."
+            className="mt-1 min-h-[80px] print:border-2 print:border-black print:p-2"
+          />
+        </div>
 
-        <TabsContent value="all" className="space-y-8">
-          {allTruckTypes.map((type) => (
-            <TruckTypeSection
-              key={type}
-              type={type as TruckType}
-              entries={groupedEntries[type as TruckType] || []}
-              editMode={editMode}
-              editingEntry={editingEntry}
-              onStartEditing={handleStartEditing}
-              onCancelEditing={handleCancelEditing}
-              onUpdateEntry={handleUpdateEntry}
-              onDeleteEntry={handleDeleteEntry}
-              onDuplicateEntry={handleDuplicateEntry}
-              onAddEntry={handleAddEntry}
-            />
-          ))}
-        </TabsContent>
-
-        {allTruckTypes.map((type) => (
-          <TabsContent key={type} value={type}>
-            <TruckTypeSection
-              type={type as TruckType}
-              entries={groupedEntries[type as TruckType] || []}
-              editMode={editMode}
-              editingEntry={editingEntry}
-              onStartEditing={handleStartEditing}
-              onCancelEditing={handleCancelEditing}
-              onUpdateEntry={handleUpdateEntry}
-              onDeleteEntry={handleDeleteEntry}
-              onDuplicateEntry={handleDuplicateEntry}
-              onAddEntry={handleAddEntry}
-            />
-          </TabsContent>
+        {/* Schedule Tables by Truck Type */}
+        {sortedTruckTypes.map((type) => (
+          <TruckTypeSection
+            key={type}
+            type={type}
+            entries={data.byTruckType?.[type] || []}
+            onUpdateEntry={handleUpdateEntry}
+            onDeleteEntry={handleDeleteEntry}
+            onDuplicateEntry={handleDuplicateEntry}
+            onAddEntry={handleAddEntry}
+            onSaveChanges={handleSaveChanges}
+          />
         ))}
-      </Tabs>
+
+        {/* Driver Summary */}
+        <div className="mt-8 print:mt-4 driver-summary">
+          <h3 className="text-lg font-semibold mb-4 print:text-base print:mb-2 truck-header">
+            Spallina Drivers Summary
+          </h3>
+          <DriverSummary entries={data.allEntries || []} />
+        </div>
+      </div>
     </div>
   )
 }
