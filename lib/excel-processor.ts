@@ -255,21 +255,69 @@ export function processScheduleData(data: any[]): ScheduleData {
   const allEntries: ScheduleEntry[] = []
   const byTruckType: Record<TruckType, ScheduleEntry[]> = {}
 
+  // FIXED: Pre-process data to merge continuation rows with their parent jobs
+  const processedData: any[] = []
+
+  for (let i = 0; i < data.length; i++) {
+    const row = data[i]
+    const taskName = row["Task Name"] || ""
+
+    // Check if this is a main job row (has a task name)
+    if (taskName && taskName.trim() !== "") {
+      // Check if the next row is a continuation row (starts with comma and has numeric data)
+      const nextRow = data[i + 1]
+      if (nextRow && nextRow["Task ID"] && nextRow["Task ID"].startsWith(",")) {
+        // This is a continuation row with additional data
+        const continuationData = nextRow["Task ID"].split(",")
+        console.log(`🔗 Found continuation row for "${taskName}": ${nextRow["Task ID"]}`)
+
+        // Parse the continuation data: ,numTrucks,interval,offset
+        if (continuationData.length >= 4) {
+          const numTrucks = continuationData[1] || ""
+          const interval = continuationData[2] || ""
+          const offset = continuationData[3] || ""
+
+          console.log(`📊 Continuation data - NumTrucks: ${numTrucks}, Interval: ${interval}, Offset: ${offset}`)
+
+          // Merge the continuation data into the main row
+          row["Number of Trucks (number)"] = numTrucks
+          row["Interval Between Trucks (number)"] = interval
+          row["Minutes Before Shift (SHOWUPTIME) (number)"] = offset
+
+          console.log(`✅ Merged data into "${taskName}" - Offset: ${offset} minutes`)
+        }
+
+        // Skip the continuation row in the next iteration
+        i++
+      }
+
+      processedData.push(row)
+    } else if (taskName.trim() === "" && !row["Task ID"].startsWith(",")) {
+      // This might be a standalone row, add it as is
+      processedData.push(row)
+    }
+    // Skip continuation rows that start with comma - they've already been processed
+  }
+
+  console.log(`📋 Processed ${processedData.length} rows after merging continuation data`)
+
   // Group rows by job name to process related entries together
   const jobGroups: Record<string, any[]> = {}
-  data.forEach((row) => {
+  processedData.forEach((row) => {
     const jobName = row["Task Name"] || ""
-    if (!jobGroups[jobName]) {
-      jobGroups[jobName] = []
+    if (jobName.trim() !== "") {
+      if (!jobGroups[jobName]) {
+        jobGroups[jobName] = []
+      }
+      jobGroups[jobName].push(row)
     }
-    jobGroups[jobName].push(row)
   })
 
   console.log(`Found ${Object.keys(jobGroups).length} unique job names`)
 
   // Process each job group
   Object.entries(jobGroups).forEach(([jobName, jobRows]) => {
-    console.log(`\nProcessing job: ${jobName} with ${jobRows.length} rows`)
+    console.log(`\n🏗️ Processing job: ${jobName} with ${jobRows.length} rows`)
 
     // Get common data from the first row
     const firstRow = jobRows[0]
@@ -279,11 +327,11 @@ export function processScheduleData(data: any[]): ScheduleData {
 
     // Get truck type (default to "Dump Truck" if not specified)
     const truckType = (findValueInRow(firstRow, ["Truck Type (drop down)", "Truck Type"]) || "").trim() || "Dump Truck"
-    console.log(`Truck type: ${truckType}`)
+    console.log(`🚚 Truck type: ${truckType}`)
 
     // Check if this is an ASPHALT entry
     const isAsphaltEntry = truckType.toUpperCase().includes("ASPHALT")
-    console.log(`Is ASPHALT entry: ${isAsphaltEntry}`)
+    console.log(`🛣️ Is ASPHALT entry: ${isAsphaltEntry}`)
 
     // Get pit location
     const pit = (findValueInRow(firstRow, ["Pit Location (labels)", "Pit Location (drop down)", "Pit Location"]) || "")
@@ -329,7 +377,7 @@ export function processScheduleData(data: any[]): ScheduleData {
     if (firstRow["Due Date"]) {
       try {
         const dateString = firstRow["Due Date"]
-        console.log(`Due Date string: ${dateString}`)
+        console.log(`📅 Due Date string: ${dateString}`)
 
         // Extract date part using our helper function
         date = parseDateFromMondayFormat(dateString)
@@ -347,11 +395,11 @@ export function processScheduleData(data: any[]): ScheduleData {
           }
         }
 
-        console.log(`Parsed date: ${date}`)
+        console.log(`📅 Parsed date: ${date}`)
 
         // Extract time part
         baseTime = parseTimeFromDateString(dateString)
-        console.log(`Extracted base time: ${baseTime}`)
+        console.log(`⏰ Extracted base time: ${baseTime}`)
       } catch (e) {
         console.error("Error parsing date:", e)
         date = firstRow["Due Date"]
@@ -361,12 +409,12 @@ export function processScheduleData(data: any[]): ScheduleData {
     // Use the time field if available, otherwise keep the extracted time
     if (firstRow["Time (short text)"]) {
       baseTime = firstRow["Time (short text)"].toString()
-      console.log(`Using Time (short text): ${baseTime}`)
+      console.log(`⏰ Using Time (short text): ${baseTime}`)
     }
 
     // Convert base time to 24-hour format for calculations
     const formattedBaseTime = convertTo24HourFormat(baseTime)
-    console.log(`Formatted base time: ${formattedBaseTime}`)
+    console.log(`⏰ Formatted base time: ${formattedBaseTime}`)
 
     // Get the number of trucks required
     const numTrucksStr =
@@ -382,7 +430,7 @@ export function processScheduleData(data: any[]): ScheduleData {
       console.warn("Could not parse number of trucks:", numTrucksStr)
       numTrucks = 1
     }
-    console.log(`Number of trucks: ${numTrucks}`)
+    console.log(`🚛 Number of trucks: ${numTrucks}`)
 
     // Get the interval between trucks
     const intervalStr =
@@ -401,14 +449,14 @@ export function processScheduleData(data: any[]): ScheduleData {
       console.warn("Could not parse interval between trucks:", intervalStr)
       interval = 0
     }
-    console.log(`Interval between trucks: ${interval} minutes`)
+    console.log(`⏱️ Interval between trucks: ${interval} minutes`)
 
-    // Get the show-up time offset from Column O - use this if provided, otherwise default to 15 minutes for Spallina trucks
-    console.log("Looking for show-up offset in columns:", Object.keys(firstRow))
+    // FIXED: Get the show-up time offset - now properly merged from continuation rows
+    console.log("🔍 Looking for show-up offset in merged data...")
 
     let showUpOffset = 15 // Default value for Spallina trucks
 
-    // Try to get the offset from column O (Minutes Before Shift)
+    // Try to get the offset from the merged data
     const showUpOffsetStr = findValueInRow(firstRow, [
       "Minutes Before Shift (SHOWUPTIME) (number)",
       "Minutes Before Shift (SHOWUPTIME)",
@@ -420,28 +468,28 @@ export function processScheduleData(data: any[]): ScheduleData {
       "O", // Column O
     ])
 
-    console.log(`Raw show-up offset value from CSV Column O: "${showUpOffsetStr}"`)
+    console.log(`🎯 Raw show-up offset value from merged data: "${showUpOffsetStr}"`)
 
     if (showUpOffsetStr && showUpOffsetStr.trim() !== "") {
       try {
         const parsedOffset = Number.parseFloat(showUpOffsetStr.trim())
         if (!isNaN(parsedOffset)) {
           showUpOffset = Math.round(parsedOffset)
-          console.log(`✅ Using custom show-up offset from Column O: ${showUpOffset} minutes`)
+          console.log(`✅ USING CUSTOM SHOW-UP OFFSET: ${showUpOffset} minutes`)
         } else {
-          console.warn(`Could not parse show-up time offset (NaN): "${showUpOffsetStr}", using default 15 minutes`)
+          console.warn(`❌ Could not parse show-up time offset (NaN): "${showUpOffsetStr}", using default 15 minutes`)
         }
       } catch (e) {
         console.warn(
-          `Could not parse show-up time offset (exception): "${showUpOffsetStr}", using default 15 minutes`,
+          `❌ Could not parse show-up time offset (exception): "${showUpOffsetStr}", using default 15 minutes`,
           e,
         )
       }
     } else {
-      console.log(`No show-up offset found in Column O, using default for Spallina trucks: ${showUpOffset} minutes`)
+      console.log(`⚠️ No show-up offset found, using default for Spallina trucks: ${showUpOffset} minutes`)
     }
 
-    console.log(`Final show-up time offset: ${showUpOffset} minutes`)
+    console.log(`🎯 FINAL SHOW-UP TIME OFFSET: ${showUpOffset} minutes`)
 
     // Get assigned drivers based on truck type
     let driversAssigned = ""
@@ -458,16 +506,16 @@ export function processScheduleData(data: any[]): ScheduleData {
 
       // Log the raw value for debugging
       console.log(
-        `ASPHALT: Raw driver assignment from column F: "${driversAssigned}" (type: ${typeof driversAssigned})`,
+        `🛣️ ASPHALT: Raw driver assignment from column F: "${driversAssigned}" (type: ${typeof driversAssigned})`,
       )
 
       // If that's empty, try other driver columns
       if (!driversAssigned) {
         driversAssigned = firstRow["Drivers Assigned"] || firstRow["Drivers Assigned (labels)"] || ""
-        console.log(`ASPHALT: Fallback to other columns: "${driversAssigned}"`)
+        console.log(`🛣️ ASPHALT: Fallback to other columns: "${driversAssigned}"`)
       }
 
-      console.log(`ASPHALT: Final driver assignment: "${driversAssigned}" (type: ${typeof driversAssigned})`)
+      console.log(`🛣️ ASPHALT: Final driver assignment: "${driversAssigned}" (type: ${typeof driversAssigned})`)
     } else {
       // For other truck types, use the labels column (G)
       driversAssigned =
@@ -476,7 +524,7 @@ export function processScheduleData(data: any[]): ScheduleData {
         firstRow["Drivers Assigned (short text)"] ||
         firstRow["Drivers Assigned (text)"] ||
         ""
-      console.log(`Non-ASPHALT: Using driver assignment: "${driversAssigned}" (type: ${typeof driversAssigned})`)
+      console.log(`🚚 Non-ASPHALT: Using driver assignment: "${driversAssigned}" (type: ${typeof driversAssigned})`)
     }
 
     let driversList: string[] = []
@@ -492,7 +540,7 @@ export function processScheduleData(data: any[]): ScheduleData {
           .split(/\s*,\s*/)
           .map((d) => d.trim())
           .filter((d) => d)
-        console.log(`Assigned drivers: ${driversList.join(", ")}`)
+        console.log(`🚛 Assigned drivers: ${driversList.join(", ")}`)
       }
     }
 
@@ -518,21 +566,21 @@ export function processScheduleData(data: any[]): ScheduleData {
           )
         }
 
-        // Calculate show-up time based on the staggered time - ONLY for Spallina trucks (SMI/SPA)
+        // FIXED: Calculate show-up time based on the staggered time - ONLY for Spallina trucks (SMI/SPA)
         let driverShowUpTime = ""
         if (staggeredTime) {
           const isSpallinaWithOffset = isSpallinaTruckWithOffset(driver)
 
           if (isSpallinaWithOffset) {
-            // Spallina truck (SMI/SPA): apply offset from column O (or default 15 minutes)
+            // FIXED: Spallina truck (SMI/SPA): apply offset from merged data
             driverShowUpTime = addMinutesToTimeString(staggeredTime, -showUpOffset)
             console.log(
-              `SPALLINA TRUCK ${driver}: Show-up time = ${driverShowUpTime} (${showUpOffset} minutes before ${staggeredTime})`,
+              `🎯 SPALLINA TRUCK ${driver}: Show-up time = ${driverShowUpTime} (${showUpOffset} minutes BEFORE ${staggeredTime})`,
             )
           } else {
             // Contractor/other truck: show-up time = load time (NO OFFSET)
             driverShowUpTime = staggeredTime
-            console.log(`CONTRACTOR ${driver}: Show-up time = ${driverShowUpTime} (NO OFFSET - EQUAL TO LOAD TIME)`)
+            console.log(`🚚 CONTRACTOR ${driver}: Show-up time = ${driverShowUpTime} (NO OFFSET - EQUAL TO LOAD TIME)`)
           }
         }
 
@@ -543,8 +591,8 @@ export function processScheduleData(data: any[]): ScheduleData {
           shift: normalizedShift,
           truckDriver: driver,
           date,
-          time: staggeredTime,
-          showUpTime: driverShowUpTime,
+          time: staggeredTime, // This is the LOAD TIME
+          showUpTime: driverShowUpTime, // This is the SHOW-UP TIME (with offset for Spallina trucks)
           location,
           qty,
           materials,
@@ -561,7 +609,9 @@ export function processScheduleData(data: any[]): ScheduleData {
         }
         byTruckType[truckType].push(entry)
 
-        console.log(`ENTRY CREATED: ${jobName} - Driver: ${driver}, ShowUpTime: ${driverShowUpTime}`)
+        console.log(
+          `✅ ENTRY CREATED: ${jobName} - Driver: ${driver}, ShowUpTime: ${driverShowUpTime}, LoadTime: ${staggeredTime}`,
+        )
       })
     }
     // CASE 2: If we have multiple trucks required but no specific drivers
