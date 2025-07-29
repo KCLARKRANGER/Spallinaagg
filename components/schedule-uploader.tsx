@@ -1,223 +1,228 @@
 "use client"
 
-import type React from "react"
-
-import { useState } from "react"
+import { useState, useCallback } from "react"
+import { useDropzone } from "react-dropzone"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import { ScheduleReport } from "@/components/schedule-report"
-import { DebugPanel } from "@/components/debug-panel"
-import { processExcelFile, mergeScheduleData } from "@/lib/excel-processor"
-import type { ScheduleData } from "@/types/schedule"
-import { Upload, Eye, EyeOff, Bug, RefreshCw, FileText } from "lucide-react"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Progress } from "@/components/ui/progress"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
-import { ScheduleSummary } from "@/components/schedule-summary"
-import { DriverAssignmentHelper } from "@/components/driver-assignment-helper"
+import { Upload, FileSpreadsheet, CheckCircle, XCircle, AlertCircle } from "lucide-react"
+import { processExcelFile } from "@/lib/excel-processor"
+import type { ScheduleData } from "@/types/schedule"
 
-export function ScheduleUploader() {
-  const [scheduleData, setScheduleData] = useState<ScheduleData | null>(null)
-  const [rawData, setRawData] = useState<any[] | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [fileNames, setFileNames] = useState<string[]>([])
-  const [showPreview, setShowPreview] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [showDebug, setShowDebug] = useState(false)
+interface ScheduleUploaderProps {
+  onDataProcessed: (data: ScheduleData) => void
+}
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files
-    if (!files || files.length === 0) return
+export function ScheduleUploader({ onDataProcessed }: ScheduleUploaderProps) {
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [status, setStatus] = useState<"idle" | "processing" | "success" | "error">("idle")
+  const [errorMessage, setErrorMessage] = useState<string>("")
+  const [processedData, setProcessedData] = useState<ScheduleData | null>(null)
 
-    setIsLoading(true)
-    setError(null)
+  const onDrop = useCallback(
+    async (acceptedFiles: File[]) => {
+      const file = acceptedFiles[0]
+      if (!file) return
 
-    // Store file names
-    const names = Array.from(files).map((file) => file.name)
-    setFileNames(names)
-    setShowPreview(true)
+      setIsProcessing(true)
+      setStatus("processing")
+      setProgress(0)
+      setErrorMessage("")
 
-    try {
-      // Process each file and merge the data
-      let mergedData: ScheduleData | null = null
-      const rawDataArray: any[] = []
+      try {
+        // Simulate progress updates
+        const progressInterval = setInterval(() => {
+          setProgress((prev) => {
+            if (prev >= 90) {
+              clearInterval(progressInterval)
+              return 90
+            }
+            return prev + 10
+          })
+        }, 200)
 
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i]
+        // Process the file
         const data = await processExcelFile(file)
 
-        if (!mergedData) {
-          mergedData = data
+        clearInterval(progressInterval)
+        setProgress(100)
+
+        setProcessedData(data)
+        setStatus("success")
+
+        // Ensure onDataProcessed is a function before calling it
+        if (typeof onDataProcessed === "function") {
+          onDataProcessed(data)
         } else {
-          mergedData = mergeScheduleData(mergedData, data)
+          console.error("onDataProcessed is not a function:", typeof onDataProcessed)
         }
-
-        // Store raw data for debugging
-        if (file.name.toLowerCase().endsWith(".csv")) {
-          const reader = new FileReader()
-          const csvContent = await new Promise<string>((resolve) => {
-            reader.onload = (e) => resolve(e.target?.result as string)
-            reader.readAsText(file)
-          })
-
-          rawDataArray.push({ fileName: file.name, rawContent: csvContent })
-        }
+      } catch (error) {
+        console.error("Error processing file:", error)
+        setStatus("error")
+        setErrorMessage(error instanceof Error ? error.message : "Unknown error occurred")
+      } finally {
+        setIsProcessing(false)
       }
+    },
+    [onDataProcessed],
+  )
 
-      if (rawDataArray.length > 0) {
-        setRawData(rawDataArray)
-      }
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: {
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+      "application/vnd.ms-excel": [".xls"],
+      "text/csv": [".csv"],
+    },
+    multiple: false,
+    disabled: isProcessing,
+  })
 
-      if (mergedData) {
-        setScheduleData(mergedData)
-      }
-    } catch (error) {
-      console.error("Error processing files:", error)
-      setError("Error processing files. Please make sure they are valid Excel or CSV files.")
-    } finally {
-      setIsLoading(false)
+  const getStatusIcon = () => {
+    switch (status) {
+      case "processing":
+        return <AlertCircle className="h-5 w-5 text-blue-500" />
+      case "success":
+        return <CheckCircle className="h-5 w-5 text-green-500" />
+      case "error":
+        return <XCircle className="h-5 w-5 text-red-500" />
+      default:
+        return <Upload className="h-5 w-5 text-gray-500" />
     }
   }
 
-  const togglePreview = () => {
-    setShowPreview(!showPreview)
-  }
-
-  const toggleDebug = () => {
-    setShowDebug(!showDebug)
-  }
-
-  const handleClear = () => {
-    setScheduleData(null)
-    setRawData(null)
-    setFileNames([])
-    setError(null)
-    setShowPreview(true)
-    setShowDebug(false)
-
-    // Reset the file input
-    const fileInput = document.getElementById("file-upload") as HTMLInputElement
-    if (fileInput) {
-      fileInput.value = ""
+  const getStatusMessage = () => {
+    switch (status) {
+      case "processing":
+        return "Processing schedule file..."
+      case "success":
+        return `Successfully processed ${processedData?.allEntries?.length || 0} schedule entries`
+      case "error":
+        return `Error: ${errorMessage}`
+      default:
+        return "Upload Excel or CSV file to get started"
     }
-  }
-
-  const handleDriverAssignment = (updatedSchedule: ScheduleData) => {
-    setScheduleData(updatedSchedule)
   }
 
   return (
-    <div className="space-y-8">
-      <Card>
-        <CardContent className="pt-6">
-          {fileNames.length === 0 ? (
-            <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-lg">
-              <Upload className="h-10 w-10 text-muted-foreground mb-4" />
-              <p className="mb-2 text-sm text-muted-foreground">
-                <span className="font-semibold">Click to upload</span> or drag and drop
+    <Card className="w-full">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <FileSpreadsheet className="h-5 w-5" />
+          Schedule File Upload
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Upload Area */}
+        <div
+          {...getRootProps()}
+          className={`
+            border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors
+            ${isDragActive ? "border-blue-400 bg-blue-50" : "border-gray-300 hover:border-gray-400"}
+            ${isProcessing ? "cursor-not-allowed opacity-50" : ""}
+          `}
+        >
+          <input {...getInputProps()} />
+          <div className="space-y-4">
+            <div className="flex justify-center">{getStatusIcon()}</div>
+            <div>
+              <p className="text-lg font-medium">
+                {isDragActive ? "Drop the file here" : "Drag & drop your schedule file"}
               </p>
-              <p className="text-xs text-muted-foreground mb-4">Excel or CSV files</p>
-              <Button onClick={() => document.getElementById("file-upload")?.click()} disabled={isLoading}>
-                {isLoading ? "Processing..." : "Select Files"}
-              </Button>
-              <input
-                type="file"
-                id="file-upload"
-                className="hidden"
-                accept=".xlsx,.xls,.csv"
-                onChange={handleFileUpload}
-                disabled={isLoading}
-                multiple
-              />
+              <p className="text-sm text-gray-500 mt-1">{getStatusMessage()}</p>
             </div>
-          ) : (
-            <div className="flex flex-col p-4">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <p className="text-sm mb-2">
-                    Selected files: <span className="font-medium">{fileNames.length}</span>
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {fileNames.map((name, index) => (
-                      <Badge key={index} variant="outline" className="flex items-center">
-                        <FileText className="h-3 w-3 mr-1" />
-                        {name}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-                <Button variant="outline" onClick={handleClear}>
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Clear
-                </Button>
+            {!isProcessing && (
+              <Button variant="outline" className="mt-4 bg-transparent">
+                Choose File
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Progress Bar */}
+        {isProcessing && (
+          <div className="space-y-2">
+            <div className="flex justify-between text-sm">
+              <span>Processing...</span>
+              <span>{progress}%</span>
+            </div>
+            <Progress value={progress} className="w-full" />
+          </div>
+        )}
+
+        {/* Status Alert */}
+        {status !== "idle" && (
+          <Alert
+            className={
+              status === "success"
+                ? "border-green-200 bg-green-50"
+                : status === "error"
+                  ? "border-red-200 bg-red-50"
+                  : "border-blue-200 bg-blue-50"
+            }
+          >
+            <AlertDescription className="flex items-center gap-2">
+              {getStatusIcon()}
+              {getStatusMessage()}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Success Summary */}
+        {status === "success" && processedData && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-green-50 rounded-lg">
+            <div className="text-center">
+              <div className="text-2xl font-bold text-green-600">{processedData.allEntries?.length || 0}</div>
+              <div className="text-sm text-green-600">Total Entries</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-green-600">
+                {Object.keys(processedData.byTruckType || {}).length}
               </div>
-              <input
-                type="file"
-                id="file-upload"
-                className="hidden"
-                accept=".xlsx,.xls,.csv"
-                onChange={handleFileUpload}
-                disabled={isLoading}
-                multiple
-              />
+              <div className="text-sm text-green-600">Truck Types</div>
             </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {error && (
-        <Alert variant="destructive">
-          <AlertTitle>Error</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-
-      {scheduleData && (
-        <>
-          <div className="flex justify-between items-center">
-            <h2 className="text-xl font-semibold">Schedule Report</h2>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={togglePreview}>
-                {showPreview ? (
-                  <>
-                    <EyeOff className="h-4 w-4 mr-2" />
-                    Hide Preview
-                  </>
-                ) : (
-                  <>
-                    <Eye className="h-4 w-4 mr-2" />
-                    Show Preview
-                  </>
-                )}
-              </Button>
-              <Button variant="outline" size="sm" onClick={toggleDebug}>
-                <Bug className="h-4 w-4 mr-2" />
-                {showDebug ? "Hide Debug" : "Show Debug"}
-              </Button>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-green-600">
+                {processedData.allEntries?.filter((e) => e.truckDriver && e.truckDriver !== "TBD").length || 0}
+              </div>
+              <div className="text-sm text-green-600">Assigned</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-orange-600">
+                {processedData.allEntries?.filter((e) => !e.truckDriver || e.truckDriver === "TBD").length || 0}
+              </div>
+              <div className="text-sm text-orange-600">Unassigned</div>
             </div>
           </div>
+        )}
 
-          {showPreview && scheduleData && (
-            <>
-              <ScheduleSummary data={scheduleData} />
+        {/* Truck Type Breakdown */}
+        {status === "success" && processedData && (
+          <div className="space-y-2">
+            <h4 className="font-medium">Truck Types Found:</h4>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(processedData.byTruckType || {}).map(([type, entries]) => (
+                <Badge key={type} variant="secondary">
+                  {type}: {entries.length}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
 
-              <DriverAssignmentHelper scheduleData={scheduleData} onAssignDrivers={handleDriverAssignment} />
-            </>
-          )}
-
-          {showPreview ? (
-            <>
-              <ScheduleReport data={scheduleData} />
-              {showDebug && rawData && <DebugPanel data={rawData} />}
-              {showDebug && <DebugPanel data={scheduleData} />}
-            </>
-          ) : (
-            <Alert>
-              <AlertTitle>Preview Hidden</AlertTitle>
-              <AlertDescription>Click "Show Preview" to view the report before exporting.</AlertDescription>
-            </Alert>
-          )}
-        </>
-      )}
-    </div>
+        {/* Supported Formats */}
+        <div className="text-xs text-gray-500 space-y-1">
+          <p>
+            <strong>Supported formats:</strong> Excel (.xlsx, .xls), CSV (.csv)
+          </p>
+          <p>
+            <strong>Expected columns:</strong> Task Name, Truck Type, Drivers Assigned, Due Date, Location, etc.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
   )
 }

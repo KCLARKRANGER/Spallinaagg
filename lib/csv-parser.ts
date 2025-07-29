@@ -4,98 +4,105 @@ export async function parseCSV(file: File): Promise<any[]> {
 
     reader.onload = (e) => {
       try {
-        const csvContent = e.target?.result as string
-        console.log("Raw CSV content:", csvContent.substring(0, 500) + "...") // Log the first 500 chars
+        const text = e.target?.result as string
+        console.log("Raw CSV content:", text.substring(0, 500) + "...")
 
-        // Split by lines and filter out empty lines
-        const lines = csvContent.split("\n").filter((line) => line.trim().length > 0)
+        const lines = text
+          .split("\n")
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0)
 
-        // Find the header line (look for Task ID or Task Name)
-        let headerLine = 0
-        for (let i = 0; i < Math.min(20, lines.length); i++) {
+        if (lines.length === 0) {
+          resolve([])
+          return
+        }
+
+        // Find the header line (first line that looks like headers)
+        let headerIndex = -1
+        for (let i = 0; i < Math.min(5, lines.length); i++) {
           if (lines[i].includes("Task ID") || lines[i].includes("Task Name")) {
-            headerLine = i
+            headerIndex = i
             break
           }
         }
 
-        console.log("Header line found at index:", headerLine)
-        console.log("Header:", lines[headerLine])
+        if (headerIndex === -1) {
+          console.error("Could not find header line")
+          reject(new Error("Could not find header line in CSV"))
+          return
+        }
 
-        // Parse headers - handle quoted fields properly
-        const headers = parseCSVLine(lines[headerLine])
+        console.log("Header line found at index:", headerIndex)
+        console.log("Header:", lines[headerIndex])
+
+        // Parse the header
+        const headers = parseCSVLine(lines[headerIndex])
         console.log("Parsed headers:", headers)
 
-        const data = []
+        const data: any[] = []
 
-        // Process each data row
-        for (let i = headerLine + 1; i < lines.length; i++) {
-          if (!lines[i].trim()) continue
+        // Parse data rows
+        for (let i = headerIndex + 1; i < lines.length; i++) {
+          const line = lines[i]
+          if (line.trim() === "") continue
 
-          // Parse the line into fields
-          const fields = parseCSVLine(lines[i])
-          console.log(`Row ${i} fields:`, fields)
+          const fields = parseCSVLine(line)
+          console.log(`Row ${i - headerIndex} fields:`, fields)
 
-          // Create an object mapping headers to values
-          const row: Record<string, string> = {}
-          for (let j = 0; j < headers.length; j++) {
-            if (j < fields.length) {
-              row[headers[j]] = fields[j]
-            } else {
-              row[headers[j]] = ""
-            }
+          if (fields.length > 0) {
+            const row: any = {}
+            headers.forEach((header, index) => {
+              row[header] = fields[index] || ""
+            })
+            data.push(row)
           }
-
-          data.push(row)
         }
 
         console.log("Parsed CSV data:", data)
         resolve(data)
       } catch (error) {
-        console.error("CSV parsing error:", error)
+        console.error("Error parsing CSV:", error)
         reject(error)
       }
     }
 
-    reader.onerror = (error) => {
-      reject(error)
-    }
-
+    reader.onerror = () => reject(new Error("Failed to read file"))
     reader.readAsText(file)
   })
 }
 
-// Helper function to parse a CSV line, handling quoted fields properly
 function parseCSVLine(line: string): string[] {
   const result: string[] = []
-  let currentField = ""
+  let current = ""
   let inQuotes = false
+  let i = 0
 
-  for (let i = 0; i < line.length; i++) {
+  while (i < line.length) {
     const char = line[i]
-    const nextChar = i < line.length - 1 ? line[i + 1] : ""
 
     if (char === '"') {
-      if (inQuotes && nextChar === '"') {
-        // Double quotes inside quotes - add a single quote
-        currentField += '"'
-        i++ // Skip the next quote
+      if (inQuotes && line[i + 1] === '"') {
+        // Escaped quote
+        current += '"'
+        i += 2
       } else {
-        // Toggle quote mode
+        // Toggle quote state
         inQuotes = !inQuotes
+        i++
       }
     } else if (char === "," && !inQuotes) {
-      // End of field
-      result.push(currentField.trim())
-      currentField = ""
+      // Field separator
+      result.push(current.trim())
+      current = ""
+      i++
     } else {
-      // Regular character
-      currentField += char
+      current += char
+      i++
     }
   }
 
   // Add the last field
-  result.push(currentField.trim())
+  result.push(current.trim())
 
   return result
 }

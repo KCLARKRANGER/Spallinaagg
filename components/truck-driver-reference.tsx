@@ -1,382 +1,182 @@
 "use client"
 
-import type React from "react"
-
-import { useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Upload, FileText, RefreshCw, CheckCircle, Truck, User } from "lucide-react"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Input } from "@/components/ui/input"
+import { useState } from "react"
+import { Search, Truck, User } from "lucide-react"
 
-export interface TruckDriverData {
-  trucks: TruckInfo[]
-  drivers: DriverInfo[]
-}
+// Spallina truck and driver data
+const spallinaFleet = [
+  { truck: "SMI106", driver: "John Smith", type: "Dump Truck", status: "Active" },
+  { truck: "SMI107", driver: "Mike Johnson", type: "Trailer", status: "Active" },
+  { truck: "SMI108", driver: "Dave Wilson", type: "Dump Truck", status: "Active" },
+  { truck: "SMI110", driver: "Tom Brown", type: "Trailer", status: "Active" },
+  { truck: "SMI111", driver: "Steve Davis", type: "Trailer", status: "Active" },
+  { truck: "SMI112", driver: "Bob Miller", type: "Trailer", status: "Active" },
+  { truck: "SMI114", driver: "Jim Garcia", type: "Trailer", status: "Active" },
+  { truck: "SMI36", driver: "Paul Martinez", type: "Dump Truck", status: "Active" },
+  { truck: "SMI38", driver: "Mark Rodriguez", type: "Dump Truck", status: "Active" },
+  { truck: "SMI40", driver: "Dan Rice", type: "ASPHALT", status: "Active" },
+  { truck: "SMI41", driver: "Chris Lopez", type: "ASPHALT", status: "Active" },
+  { truck: "SMI42", driver: "Conner Weaver", type: "ASPHALT", status: "Active" },
+  { truck: "SMI43", driver: "Tony Gonzalez", type: "Dump Truck", status: "Active" },
+  { truck: "SMI43P", driver: "Tony Gonzalez", type: "Dump Truck", status: "Active" },
+  { truck: "SMI46", driver: "Rick Wilson", type: "Dump Truck", status: "Active" },
+  { truck: "SMI48", driver: "Joe Anderson", type: "Dump Truck", status: "Active" },
+  { truck: "SMI48P", driver: "Joe Anderson", type: "Dump Truck", status: "Active" },
+  { truck: "SMI49", driver: "Sam Thomas", type: "Dump Truck", status: "Active" },
+  { truck: "SMI49P", driver: "Sam Thomas", type: "Dump Truck", status: "Active" },
+  { truck: "SMI50", driver: "Bill Jackson", type: "Dump Truck", status: "Active" },
+  { truck: "SMI50P", driver: "Bill Jackson", type: "Trailer", status: "Active" },
+  { truck: "SMI51", driver: "Carl White", type: "Dump Truck", status: "Active" },
+  { truck: "SMI67", driver: "Frank Harris", type: "Dump Truck", status: "Active" },
+  { truck: "SMI68", driver: "Gary Martin", type: "Dump Truck", status: "Active" },
+  { truck: "SMI69", driver: "Henry Thompson", type: "Dump Truck", status: "Active" },
+  { truck: "SMI70", driver: "Ivan Garcia", type: "Dump Truck", status: "Active" },
+  { truck: "SMI71", driver: "Jack Martinez", type: "Dump Truck", status: "Active" },
+  { truck: "SMI72", driver: "Kevin Robinson", type: "Dump Truck", status: "Active" },
+  { truck: "SMI78", driver: "Larry Clark", type: "Dump Truck", status: "Active" },
+  { truck: "SMI85", driver: "Matt Rodriguez", type: "Dump Truck", status: "Active" },
+  { truck: "SMI88", driver: "Nick Lewis", type: "Dump Truck", status: "Active" },
+  { truck: "SMI92", driver: "Oscar Lee", type: "Dump Truck", status: "Active" },
+  { truck: "SMI92S", driver: "Oscar Lee", type: "Slinger", status: "Active" },
+  { truck: "SMI94", driver: "Pete Walker", type: "Dump Truck", status: "Active" },
+  { truck: "SMI94S", driver: "Pete Walker", type: "Slinger", status: "Active" },
+  { truck: "SMI95", driver: "Quinn Hall", type: "Dump Truck", status: "Active" },
+  { truck: "SMI95S", driver: "Quinn Hall", type: "Slinger", status: "Active" },
+  { truck: "SMI96", driver: "Ray Allen", type: "Dump Truck", status: "Active" },
+  { truck: "SMI96S", driver: "Ray Allen", type: "Slinger", status: "Active" },
+  { truck: "SMI97", driver: "Sam Young", type: "Dump Truck", status: "Active" },
+  { truck: "SMI97S", driver: "Sam Young", type: "Slinger", status: "Active" },
+  { truck: "MMH06", driver: "Tony Hernandez", type: "ASPHALT", status: "Active" },
+  { truck: "MMH08", driver: "Victor King", type: "ASPHALT", status: "Active" },
+  { truck: "SPA33", driver: "Will Wright", type: "Dump Truck", status: "Active" },
+]
 
-export interface TruckInfo {
-  id: string
-  type: string
-  status: "active" | "maintenance" | "inactive"
-  capacity?: string
-  notes?: string
-}
+const contractorTrucks = [
+  { truck: "WAT44", driver: "External Driver", type: "Dump Truck", status: "Contractor" },
+  { truck: "WAT48", driver: "External Driver", type: "Dump Truck", status: "Contractor" },
+  { truck: "MAT51", driver: "External Driver", type: "Dump Truck", status: "Contractor" },
+  { truck: "NCHFB", driver: "External Driver", type: "Dump Truck", status: "Contractor" },
+  { truck: "SNOWFLAKE", driver: "External Driver", type: "Dump Truck", status: "Contractor" },
+  { truck: "SNOW2", driver: "External Driver", type: "Dump Truck", status: "Contractor" },
+  { truck: "SNOW3", driver: "External Driver", type: "Dump Truck", status: "Contractor" },
+  { truck: "SNOW4", driver: "External Driver", type: "Dump Truck", status: "Contractor" },
+  { truck: "SNOW5", driver: "External Driver", type: "Dump Truck", status: "Contractor" },
+  { truck: "SNOW6", driver: "External Driver", type: "Dump Truck", status: "Contractor" },
+  { truck: "SNOW7", driver: "External Driver", type: "Dump Truck", status: "Contractor" },
+  { truck: "SICK", driver: "External Driver", type: "Dump Truck", status: "Contractor" },
+  { truck: "YORK", driver: "External Driver", type: "Dump Truck", status: "Contractor" },
+]
 
-export interface DriverInfo {
-  id: string
-  name: string
-  status: "active" | "off" | "unavailable"
-  preferredTruckTypes?: string[]
-  certifications?: string[]
-  notes?: string
-}
+export function TruckDriverReference() {
+  const [searchTerm, setSearchTerm] = useState("")
 
-interface TruckDriverReferenceProps {
-  onDataLoaded: (data: TruckDriverData) => void
-}
+  const allTrucks = [...spallinaFleet, ...contractorTrucks]
 
-export function TruckDriverReference({ onDataLoaded }: TruckDriverReferenceProps) {
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [fileName, setFileName] = useState<string | null>(null)
-  const [referenceData, setReferenceData] = useState<TruckDriverData | null>(null)
-  const [activeTab, setActiveTab] = useState("trucks")
+  const filteredTrucks = allTrucks.filter(
+    (truck) =>
+      truck.truck.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      truck.driver.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      truck.type.toLowerCase().includes(searchTerm.toLowerCase()),
+  )
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files
-    if (!files || files.length === 0) return
-
-    const file = files[0]
-    setFileName(file.name)
-    setIsLoading(true)
-    setError(null)
-
-    try {
-      // Read the file
-      const content = await readFileAsText(file)
-
-      // Parse the file based on its extension
-      let data: TruckDriverData
-
-      if (file.name.toLowerCase().endsWith(".json")) {
-        data = JSON.parse(content)
-      } else if (file.name.toLowerCase().endsWith(".csv")) {
-        data = parseCSVToTruckDriverData(content)
-      } else if (file.name.toLowerCase().endsWith(".xlsx") || file.name.toLowerCase().endsWith(".xls")) {
-        // For Excel files, we'd need to use a library like xlsx
-        // This is a placeholder for now
-        throw new Error("Excel files are not supported yet. Please use CSV or JSON format.")
-      } else {
-        throw new Error("Unsupported file format. Please use CSV or JSON format.")
-      }
-
-      // Validate the data structure
-      if (!validateTruckDriverData(data)) {
-        throw new Error("Invalid data format. Please check the file structure.")
-      }
-
-      // Set the data and notify parent component
-      setReferenceData(data)
-      onDataLoaded(data)
-    } catch (err) {
-      console.error("Error processing truck/driver file:", err)
-      setError(err instanceof Error ? err.message : "Failed to process the file")
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const readFileAsText = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = (e) => resolve(e.target?.result as string)
-      reader.onerror = reject
-      reader.readAsText(file)
-    })
-  }
-
-  const parseCSVToTruckDriverData = (csvContent: string): TruckDriverData => {
-    const lines = csvContent.split("\n").filter((line) => line.trim().length > 0)
-
-    // Determine if this is a truck or driver file based on headers
-    const headers = lines[0].split(",").map((h) => h.trim().toLowerCase())
-
-    const isTruckFile = headers.includes("truck id") || headers.includes("truck type")
-    const isDriverFile = headers.includes("driver id") || headers.includes("driver name")
-
-    const trucks: TruckInfo[] = []
-    const drivers: DriverInfo[] = []
-
-    // Skip header row
-    for (let i = 1; i < lines.length; i++) {
-      const values = parseCSVLine(lines[i])
-
-      if (isTruckFile && values.length >= 3) {
-        trucks.push({
-          id: values[0],
-          type: values[1],
-          status: (values[2].toLowerCase() === "active"
-            ? "active"
-            : values[2].toLowerCase() === "maintenance"
-              ? "maintenance"
-              : "inactive") as "active" | "maintenance" | "inactive",
-          capacity: values[3] || undefined,
-          notes: values[4] || undefined,
-        })
-      }
-
-      if (isDriverFile && values.length >= 3) {
-        drivers.push({
-          id: values[0],
-          name: values[1],
-          status: (values[2].toLowerCase() === "active"
-            ? "active"
-            : values[2].toLowerCase() === "off"
-              ? "off"
-              : "unavailable") as "active" | "off" | "unavailable",
-          preferredTruckTypes: values[3] ? values[3].split(";").map((t) => t.trim()) : undefined,
-          certifications: values[4] ? values[4].split(";").map((c) => c.trim()) : undefined,
-          notes: values[5] || undefined,
-        })
-      }
-    }
-
-    return { trucks, drivers }
-  }
-
-  // Helper function to parse CSV line, handling quoted fields
-  const parseCSVLine = (line: string): string[] => {
-    const result: string[] = []
-    let currentField = ""
-    let inQuotes = false
-
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i]
-      const nextChar = i < line.length - 1 ? line[i + 1] : ""
-
-      if (char === '"') {
-        if (inQuotes && nextChar === '"') {
-          // Double quotes inside quotes - add a single quote
-          currentField += '"'
-          i++ // Skip the next quote
-        } else {
-          // Toggle quote mode
-          inQuotes = !inQuotes
-        }
-      } else if (char === "," && !inQuotes) {
-        // End of field
-        result.push(currentField.trim())
-        currentField = ""
-      } else {
-        // Regular character
-        currentField += char
-      }
-    }
-
-    // Add the last field
-    result.push(currentField.trim())
-
-    return result
-  }
-
-  const validateTruckDriverData = (data: any): data is TruckDriverData => {
-    // Basic validation to ensure the data has the expected structure
-    return (
-      data &&
-      (Array.isArray(data.trucks) || Array.isArray(data.drivers)) &&
-      (!data.trucks ||
-        data.trucks.every(
-          (truck: any) =>
-            typeof truck.id === "string" && typeof truck.type === "string" && typeof truck.status === "string",
-        )) &&
-      (!data.drivers ||
-        data.drivers.every(
-          (driver: any) =>
-            typeof driver.id === "string" && typeof driver.name === "string" && typeof driver.status === "string",
-        ))
-    )
-  }
-
-  const handleClear = () => {
-    setFileName(null)
-    setReferenceData(null)
-    setError(null)
-
-    // Reset the file input
-    const fileInput = document.getElementById("truck-driver-file") as HTMLInputElement
-    if (fileInput) {
-      fileInput.value = ""
-    }
-  }
-
-  const getStatusBadgeVariant = (status: string) => {
-    switch (status.toLowerCase()) {
-      case "active":
-        return "success"
-      case "maintenance":
-      case "off":
-        return "warning"
-      case "inactive":
-      case "unavailable":
-        return "destructive"
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "Active":
+        return "bg-green-100 text-green-800"
+      case "Contractor":
+        return "bg-blue-100 text-blue-800"
       default:
-        return "secondary"
+        return "bg-gray-100 text-gray-800"
+    }
+  }
+
+  const getTruckTypeColor = (type: string) => {
+    switch (type) {
+      case "ASPHALT":
+        return "bg-pink-100 text-pink-800"
+      case "Dump Truck":
+        return "bg-orange-100 text-orange-800"
+      case "Trailer":
+        return "bg-green-100 text-green-800"
+      case "Slinger":
+        return "bg-yellow-100 text-yellow-800"
+      default:
+        return "bg-gray-100 text-gray-800"
     }
   }
 
   return (
-    <Card>
+    <Card className="w-full">
       <CardHeader>
-        <CardTitle>Truck & Driver Reference</CardTitle>
-        <CardDescription>Upload a reference file of available trucks and drivers</CardDescription>
+        <CardTitle className="flex items-center gap-2">
+          <Truck className="h-5 w-5" />
+          Truck & Driver Reference
+        </CardTitle>
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <Input
+            placeholder="Search trucks, drivers, or types..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10"
+          />
+        </div>
       </CardHeader>
       <CardContent>
-        {!fileName ? (
-          <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-lg">
-            <Upload className="h-10 w-10 text-muted-foreground mb-4" />
-            <p className="mb-2 text-sm text-muted-foreground">
-              <span className="font-semibold">Click to upload</span> or drag and drop
-            </p>
-            <p className="text-xs text-muted-foreground mb-4">CSV or JSON files</p>
-            <Button onClick={() => document.getElementById("truck-driver-file")?.click()} disabled={isLoading}>
-              {isLoading ? "Processing..." : "Select File"}
-            </Button>
-            <input
-              type="file"
-              id="truck-driver-file"
-              className="hidden"
-              accept=".csv,.json,.xlsx,.xls"
-              onChange={handleFileUpload}
-              disabled={isLoading}
-            />
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <FileText className="h-5 w-5 mr-2 text-primary" />
-                <span className="font-medium">{fileName}</span>
-              </div>
-              <Button variant="outline" size="sm" onClick={handleClear}>
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Clear
-              </Button>
+        <div className="space-y-4">
+          {/* Summary Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div className="text-center p-3 bg-green-50 rounded-lg">
+              <div className="text-2xl font-bold text-green-600">{spallinaFleet.length}</div>
+              <div className="text-sm text-green-600">Spallina Trucks</div>
             </div>
-
-            {error && (
-              <Alert variant="destructive">
-                <AlertTitle>Error</AlertTitle>
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-
-            {referenceData && (
-              <div className="mt-4">
-                <Alert variant="default" className="bg-green-50 border-green-200 mb-4">
-                  <CheckCircle className="h-4 w-4 text-green-600" />
-                  <AlertTitle className="text-green-800">Reference Data Loaded</AlertTitle>
-                  <AlertDescription className="text-green-700">
-                    {referenceData.trucks?.length || 0} trucks and {referenceData.drivers?.length || 0} drivers loaded
-                    successfully.
-                  </AlertDescription>
-                </Alert>
-
-                <Tabs value={activeTab} onValueChange={setActiveTab}>
-                  <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="trucks" className="flex items-center">
-                      <Truck className="h-4 w-4 mr-2" />
-                      Trucks ({referenceData.trucks?.length || 0})
-                    </TabsTrigger>
-                    <TabsTrigger value="drivers" className="flex items-center">
-                      <User className="h-4 w-4 mr-2" />
-                      Drivers ({referenceData.drivers?.length || 0})
-                    </TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="trucks" className="mt-4">
-                    {referenceData.trucks && referenceData.trucks.length > 0 ? (
-                      <div className="rounded-md border">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>ID</TableHead>
-                              <TableHead>Type</TableHead>
-                              <TableHead>Status</TableHead>
-                              <TableHead>Capacity</TableHead>
-                              <TableHead>Notes</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {referenceData.trucks.map((truck) => (
-                              <TableRow key={truck.id}>
-                                <TableCell className="font-medium">{truck.id}</TableCell>
-                                <TableCell>{truck.type}</TableCell>
-                                <TableCell>
-                                  <Badge variant={getStatusBadgeVariant(truck.status) as any}>{truck.status}</Badge>
-                                </TableCell>
-                                <TableCell>{truck.capacity || "-"}</TableCell>
-                                <TableCell className="max-w-[200px] truncate">{truck.notes || "-"}</TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    ) : (
-                      <div className="text-center p-4 text-muted-foreground">No truck data available</div>
-                    )}
-                  </TabsContent>
-
-                  <TabsContent value="drivers" className="mt-4">
-                    {referenceData.drivers && referenceData.drivers.length > 0 ? (
-                      <div className="rounded-md border">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>ID</TableHead>
-                              <TableHead>Name</TableHead>
-                              <TableHead>Status</TableHead>
-                              <TableHead>Preferred Trucks</TableHead>
-                              <TableHead>Certifications</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {referenceData.drivers.map((driver) => (
-                              <TableRow key={driver.id}>
-                                <TableCell className="font-medium">{driver.id}</TableCell>
-                                <TableCell>{driver.name}</TableCell>
-                                <TableCell>
-                                  <Badge variant={getStatusBadgeVariant(driver.status) as any}>{driver.status}</Badge>
-                                </TableCell>
-                                <TableCell>
-                                  {driver.preferredTruckTypes?.map((type, i) => (
-                                    <Badge key={i} variant="outline" className="mr-1">
-                                      {type}
-                                    </Badge>
-                                  )) || "-"}
-                                </TableCell>
-                                <TableCell>
-                                  {driver.certifications?.map((cert, i) => (
-                                    <Badge key={i} variant="secondary" className="mr-1">
-                                      {cert}
-                                    </Badge>
-                                  )) || "-"}
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    ) : (
-                      <div className="text-center p-4 text-muted-foreground">No driver data available</div>
-                    )}
-                  </TabsContent>
-                </Tabs>
+            <div className="text-center p-3 bg-blue-50 rounded-lg">
+              <div className="text-2xl font-bold text-blue-600">{contractorTrucks.length}</div>
+              <div className="text-sm text-blue-600">Contractor Trucks</div>
+            </div>
+            <div className="text-center p-3 bg-orange-50 rounded-lg">
+              <div className="text-2xl font-bold text-orange-600">
+                {allTrucks.filter((t) => t.type === "Dump Truck").length}
               </div>
-            )}
+              <div className="text-sm text-orange-600">Dump Trucks</div>
+            </div>
+            <div className="text-center p-3 bg-pink-50 rounded-lg">
+              <div className="text-2xl font-bold text-pink-600">
+                {allTrucks.filter((t) => t.type === "ASPHALT").length}
+              </div>
+              <div className="text-sm text-pink-600">Asphalt Trucks</div>
+            </div>
           </div>
-        )}
+
+          {/* Truck List */}
+          <div className="grid gap-3 max-h-96 overflow-y-auto">
+            {filteredTrucks.map((truck, index) => (
+              <div key={index} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <Truck className="h-4 w-4 text-gray-500" />
+                    <span className="font-mono font-medium">{truck.truck}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <User className="h-4 w-4 text-gray-500" />
+                    <span className="text-sm">{truck.driver}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge className={getTruckTypeColor(truck.type)}>{truck.type}</Badge>
+                  <Badge className={getStatusColor(truck.status)}>{truck.status}</Badge>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {filteredTrucks.length === 0 && (
+            <div className="text-center py-8 text-gray-500">No trucks found matching your search criteria</div>
+          )}
+        </div>
       </CardContent>
     </Card>
   )

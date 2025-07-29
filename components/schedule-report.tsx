@@ -1,5 +1,7 @@
 "use client"
-import { useState } from "react"
+import { useState, useCallback, useMemo } from "react"
+import type React from "react"
+
 import { Button } from "@/components/ui/button"
 import type { ScheduleData, ScheduleEntry, TruckType } from "@/types/schedule"
 import { Save, Trash2, Copy, Plus, Download, Printer } from "lucide-react"
@@ -441,6 +443,65 @@ function extractReportDate(data: ScheduleData): Date {
   return today
 }
 
+// Individual field components to prevent re-rendering
+const EditableField = ({
+  value,
+  onChange,
+  placeholder,
+  className,
+  type = "text",
+  rows,
+  min,
+}: {
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string
+  className?: string
+  type?: string
+  rows?: number
+  min?: string
+}) => {
+  const handleChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      onChange(e.target.value)
+    },
+    [onChange],
+  )
+
+  if (rows) {
+    return (
+      <Textarea value={value} onChange={handleChange} placeholder={placeholder} className={className} rows={rows} />
+    )
+  }
+
+  return (
+    <Input
+      value={value}
+      onChange={handleChange}
+      placeholder={placeholder}
+      className={className}
+      type={type}
+      min={min}
+    />
+  )
+}
+
+const TimeField = ({
+  value,
+  onChange,
+  placeholder,
+  className,
+  step = 5,
+}: {
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string
+  className?: string
+  step?: number
+}) => {
+  return <TimeAdjuster value={value} onChange={onChange} placeholder={placeholder} className={className} step={step} />
+}
+
 interface TruckTypeSectionProps {
   type: TruckType
   entries: ScheduleEntry[]
@@ -461,26 +522,105 @@ function TruckTypeSection({
   onSaveChanges,
 }: TruckTypeSectionProps) {
   // Sort entries chronologically by LOAD TIME - show ALL entries, not just complete ones
-  const sortedEntries = sortEntriesChronologically(entries)
-
-  // Skip rendering if entries are empty
-  if (sortedEntries.length === 0) return null
-
-  // Debug logging for entries of this truck type
-  console.log(`TruckTypeSection: ${type} with ${sortedEntries.length} entries`)
-  sortedEntries.forEach((entry, idx) => {
-    console.log(
-      `Entry ${idx}: Job=${entry.jobName}, Time=${entry.time}, ShowUpTime=${entry.showUpTime}, Driver=${entry.truckDriver}, ShowUpOffset=${entry.showUpOffset}`,
-    )
-  })
+  const sortedEntries = useMemo(() => sortEntriesChronologically(entries), [entries])
 
   // Get color for this truck type
   const headerColor = getTruckTypeColor(type)
 
-  const handleFieldChange = (index: number, field: keyof ScheduleEntry, value: string) => {
-    const updatedEntry = { ...sortedEntries[index], [field]: value }
-    onUpdateEntry(updatedEntry, index, type)
-  }
+  // Create stable field change handlers for each entry
+  const fieldChangeHandlers = useMemo(
+    () =>
+      sortedEntries.map((entry, index) => ({
+        jobName: (value: string) => {
+          const updatedEntry = { ...entry, jobName: value }
+          onUpdateEntry(updatedEntry, index, type)
+        },
+        shift: (value: string) => {
+          const updatedEntry = { ...entry, shift: value }
+          onUpdateEntry(updatedEntry, index, type)
+        },
+        showUpTime: (value: string) => {
+          const updatedEntry = { ...entry, showUpTime: value }
+          // When show-up time changes, recalculate load time if needed
+          const isSpallinaWithOffset = isSpallinaTruckWithOffset(updatedEntry.truckDriver)
+          if (isSpallinaWithOffset) {
+            const offset = updatedEntry.showUpOffset ? Number.parseInt(updatedEntry.showUpOffset, 10) : 15
+            const formattedTime = convertTo24HourFormat(value)
+            if (formattedTime) {
+              updatedEntry.time = addMinutesToTimeString(formattedTime, offset)
+            }
+          } else {
+            // For contractors, load time equals show-up time
+            updatedEntry.time = convertTo24HourFormat(value) || value
+          }
+          onUpdateEntry(updatedEntry, index, type)
+        },
+        time: (value: string) => {
+          const updatedEntry = { ...entry, time: value }
+          // When load time changes, recalculate show-up time if needed
+          const isSpallinaWithOffset = isSpallinaTruckWithOffset(updatedEntry.truckDriver)
+          if (isSpallinaWithOffset) {
+            const offset = updatedEntry.showUpOffset ? Number.parseInt(updatedEntry.showUpOffset, 10) : 15
+            const formattedTime = convertTo24HourFormat(value)
+            if (formattedTime) {
+              updatedEntry.showUpTime = addMinutesToTimeString(formattedTime, -offset)
+            }
+          } else {
+            // For contractors, show-up time equals load time
+            updatedEntry.showUpTime = convertTo24HourFormat(value) || value
+          }
+          onUpdateEntry(updatedEntry, index, type)
+        },
+        location: (value: string) => {
+          const updatedEntry = { ...entry, location: value }
+          onUpdateEntry(updatedEntry, index, type)
+        },
+        truckDriver: (value: string) => {
+          const updatedEntry = { ...entry, truckDriver: value }
+          // When driver changes, recalculate show-up time based on new driver type
+          const isSpallinaWithOffset = isSpallinaTruckWithOffset(value)
+          const displayTime = updatedEntry.time || ""
+
+          if (displayTime) {
+            if (isSpallinaWithOffset) {
+              const offset = updatedEntry.showUpOffset ? Number.parseInt(updatedEntry.showUpOffset, 10) : 15
+              const formattedTime = convertTo24HourFormat(displayTime)
+              if (formattedTime) {
+                updatedEntry.showUpTime = addMinutesToTimeString(formattedTime, -offset)
+              }
+            } else {
+              // For contractors, show-up time equals load time
+              updatedEntry.showUpTime = convertTo24HourFormat(displayTime) || displayTime
+            }
+          }
+          onUpdateEntry(updatedEntry, index, type)
+        },
+        materials: (value: string) => {
+          const updatedEntry = { ...entry, materials: value }
+          onUpdateEntry(updatedEntry, index, type)
+        },
+        pit: (value: string) => {
+          const updatedEntry = { ...entry, pit: value }
+          onUpdateEntry(updatedEntry, index, type)
+        },
+        qty: (value: string) => {
+          const updatedEntry = { ...entry, qty: value }
+          onUpdateEntry(updatedEntry, index, type)
+        },
+        numTrucks: (value: string) => {
+          const updatedEntry = { ...entry, numTrucks: value }
+          onUpdateEntry(updatedEntry, index, type)
+        },
+        notes: (value: string) => {
+          const updatedEntry = { ...entry, notes: value }
+          onUpdateEntry(updatedEntry, index, type)
+        },
+      })),
+    [sortedEntries, onUpdateEntry, type],
+  )
+
+  // Skip rendering if entries are empty
+  if (sortedEntries.length === 0) return null
 
   return (
     <div className="mb-8 print:mb-0 truck-section">
@@ -541,121 +681,113 @@ function TruckTypeSection({
                   const formattedTime = convertTo24HourFormat(displayTime)
                   if (formattedTime) {
                     showUpTime = addMinutesToTimeString(formattedTime, -offset)
-                    console.log(
-                      `⏰ SPALLINA TRUCK ${entry.truckDriver}: Load=${formattedTime} → Show-up=${showUpTime} (${offset}min offset)`,
-                    )
                   }
                 } else {
                   // Contractor/other truck: show-up time = load time (NO OFFSET)
                   showUpTime = convertTo24HourFormat(displayTime) || displayTime
-                  console.log(
-                    `⏰ CONTRACTOR ${entry.truckDriver}: Load=${displayTime} → Show-up=${showUpTime} (NO OFFSET - EQUAL TIMES)`,
-                  )
                 }
               }
 
+              const handlers = fieldChangeHandlers[index]
+
               return (
                 <tr
-                  key={`${entry.jobName}-${entry.truckDriver}-${index}`}
+                  key={`${type}-${index}`}
                   className={`${index % 2 === 0 ? "bg-background" : "bg-muted/30"} print:bg-transparent`}
                 >
                   <td className="p-2 border border-gray-300 print:p-1">
                     <div className="space-y-1">
-                      <Textarea
+                      <EditableField
                         value={entry.jobName || ""}
-                        onChange={(e) => handleFieldChange(index, "jobName", e.target.value)}
-                        className="min-h-[60px] resize-none border-none bg-transparent p-1 print:border-none print:bg-transparent text-sm"
+                        onChange={handlers.jobName}
                         placeholder="Job name"
+                        className="min-h-[60px] resize-none border border-gray-200 bg-white p-2 print:border-none print:bg-transparent text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                         rows={3}
                       />
                       {entry.shift && (
-                        <Input
+                        <EditableField
                           value={entry.shift || ""}
-                          onChange={(e) => handleFieldChange(index, "shift", e.target.value)}
-                          className="h-6 border-none bg-transparent p-1 print:border-none print:bg-transparent text-xs"
+                          onChange={handlers.shift}
                           placeholder="Shift"
+                          className="h-8 border border-gray-200 bg-white p-2 print:border-none print:bg-transparent text-xs focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                         />
                       )}
                     </div>
                   </td>
                   <td className="p-2 border border-gray-300 font-mono print:p-1 w-[100px] time-column">
-                    <TimeAdjuster
+                    <TimeField
                       value={convertTo24HourFormat(showUpTime) || ""}
-                      onChange={(value) => handleFieldChange(index, "showUpTime", value)}
-                      className="w-full h-8 border-none bg-transparent p-1 print:border-none print:bg-transparent text-sm font-mono"
+                      onChange={handlers.showUpTime}
                       placeholder="HH:MM"
+                      className="w-full h-8 border border-gray-200 bg-white p-2 print:border-none print:bg-transparent text-sm font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                       step={5}
                     />
                   </td>
                   <td className="p-2 border border-gray-300 font-mono print:p-1 w-[100px] time-column">
-                    <TimeAdjuster
+                    <TimeField
                       value={convertTo24HourFormat(displayTime) || ""}
-                      onChange={(value) => handleFieldChange(index, "time", value)}
-                      className="w-full h-8 border-none bg-transparent p-1 print:border-none print:bg-transparent text-sm font-mono"
+                      onChange={handlers.time}
                       placeholder="HH:MM"
+                      className="w-full h-8 border border-gray-200 bg-white p-2 print:border-none print:bg-transparent text-sm font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                       step={5}
                     />
                   </td>
                   <td className="p-2 border border-gray-300 print:p-1">
-                    <Textarea
+                    <EditableField
                       value={entry.location || ""}
-                      onChange={(e) => handleFieldChange(index, "location", e.target.value)}
-                      className="min-h-[60px] resize-none border-none bg-transparent p-1 print:border-none print:bg-transparent text-sm"
+                      onChange={handlers.location}
                       placeholder="Location"
+                      className="min-h-[60px] resize-none border border-gray-200 bg-white p-2 print:border-none print:bg-transparent text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                       rows={3}
                     />
                   </td>
                   <td className="p-2 border border-gray-300 print:p-1 w-[120px] driver-column">
-                    <Input
-                      value={isContractorTruck(entry.truckDriver) ? `*${entry.truckDriver}` : entry.truckDriver || ""}
-                      onChange={(e) => {
-                        // Remove asterisk when editing
-                        const value = e.target.value.replace(/^\*/, "")
-                        handleFieldChange(index, "truckDriver", value)
-                      }}
-                      className="w-full h-8 border-none bg-transparent p-1 print:border-none print:bg-transparent text-sm"
+                    <EditableField
+                      value={entry.truckDriver || ""}
+                      onChange={handlers.truckDriver}
                       placeholder="Driver/Truck"
+                      className="w-full h-8 border border-gray-200 bg-white p-2 print:border-none print:bg-transparent text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                     />
                   </td>
                   <td className="p-2 border border-gray-300 print:p-1 w-[140px]">
-                    <Input
+                    <EditableField
                       value={entry.materials || ""}
-                      onChange={(e) => handleFieldChange(index, "materials", e.target.value)}
-                      className="w-full h-8 border-none bg-transparent p-1 print:border-none print:bg-transparent text-sm"
+                      onChange={handlers.materials}
                       placeholder="Materials"
+                      className="w-full h-8 border border-gray-200 bg-white p-2 print:border-none print:bg-transparent text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                     />
                   </td>
                   <td className="p-2 border border-gray-300 print:p-1 w-[120px]">
-                    <Input
+                    <EditableField
                       value={entry.pit || ""}
-                      onChange={(e) => handleFieldChange(index, "pit", e.target.value)}
-                      className="w-full h-8 border-none bg-transparent p-1 print:border-none print:bg-transparent text-sm"
+                      onChange={handlers.pit}
                       placeholder="Pit"
+                      className="w-full h-8 border border-gray-200 bg-white p-2 print:border-none print:bg-transparent text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                     />
                   </td>
                   <td className="p-2 border border-gray-300 print:p-1 w-[100px]">
-                    <Input
+                    <EditableField
                       value={entry.qty || ""}
-                      onChange={(e) => handleFieldChange(index, "qty", e.target.value)}
-                      className="w-full h-8 border-none bg-transparent p-1 print:border-none print:bg-transparent text-sm"
+                      onChange={handlers.qty}
                       placeholder="Qty"
+                      className="w-full h-8 border border-gray-200 bg-white p-2 print:border-none print:bg-transparent text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                     />
                   </td>
                   <td className="p-2 border border-gray-300 print:p-1">
-                    <Input
+                    <EditableField
                       value={entry.numTrucks || "1"}
-                      onChange={(e) => handleFieldChange(index, "numTrucks", e.target.value)}
-                      className="h-8 border-none bg-transparent p-1 print:border-none print:bg-transparent text-sm"
+                      onChange={handlers.numTrucks}
+                      className="h-8 border border-gray-200 bg-white p-2 print:border-none print:bg-transparent text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                       type="number"
                       min="1"
                     />
                   </td>
                   <td className="p-2 border border-gray-300 print:p-1 w-[200px]">
-                    <Textarea
+                    <EditableField
                       value={entry.notes || ""}
-                      onChange={(e) => handleFieldChange(index, "notes", e.target.value)}
-                      className="min-h-[60px] resize-none border-none bg-transparent p-1 print:border-none print:bg-transparent text-sm"
+                      onChange={handlers.notes}
                       placeholder="Notes"
+                      className="min-h-[60px] resize-none border border-gray-200 bg-white p-2 print:border-none print:bg-transparent text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                       rows={3}
                     />
                   </td>
@@ -696,133 +828,171 @@ export function ScheduleReport({ data, onUpdateData }: ScheduleReportProps) {
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false)
   const { toast } = useToast()
 
-  // Extract report date from the data
-  const reportDate = extractReportDate(data)
-
   // Sort truck types in desired order
   const truckTypeOrder = ["ASPHALT", "Dump Truck", "Slinger", "Trailer", "Triaxle", "6 Wheeler", "Mixer", "Conveyor"]
-  const sortedTruckTypes = Object.keys(data.byTruckType || {}).sort((a, b) => {
-    const aIndex = truckTypeOrder.indexOf(a)
-    const bIndex = truckTypeOrder.indexOf(b)
+  const sortedTruckTypes = useMemo(() => {
+    return Object.keys(data.byTruckType || {}).sort((a, b) => {
+      const aIndex = truckTypeOrder.indexOf(a)
+      const bIndex = truckTypeOrder.indexOf(b)
 
-    if (aIndex !== -1 && bIndex !== -1) {
-      return aIndex - bIndex
-    }
-    if (aIndex !== -1) return -1
-    if (bIndex !== -1) return 1
-    return a.localeCompare(b)
-  })
+      if (aIndex !== -1 && bIndex !== -1) {
+        return aIndex - bIndex
+      }
+      if (aIndex !== -1) return -1
+      if (bIndex !== -1) return 1
+      return a.localeCompare(b)
+    })
+  }, [data.byTruckType])
 
-  const handleUpdateEntry = (updatedEntry: ScheduleEntry, index: number, type: TruckType) => {
-    const updatedData = { ...data }
+  const handleUpdateEntry = useCallback(
+    (updatedEntry: ScheduleEntry, index: number, type: TruckType) => {
+      if (!onUpdateData || typeof onUpdateData !== "function") {
+        console.error("onUpdateData is not a function:", onUpdateData)
+        return
+      }
 
-    // Update in byTruckType
-    if (updatedData.byTruckType && updatedData.byTruckType[type]) {
-      updatedData.byTruckType[type][index] = updatedEntry
-    }
+      const updatedData = { ...data }
 
-    // Update in allEntries - find by matching original entry
-    if (updatedData.allEntries) {
-      const originalEntry = data.byTruckType?.[type]?.[index]
-      if (originalEntry) {
-        const allEntriesIndex = updatedData.allEntries.findIndex(
-          (entry) =>
-            entry.jobName === originalEntry.jobName &&
-            entry.truckDriver === originalEntry.truckDriver &&
-            entry.time === originalEntry.time,
-        )
-        if (allEntriesIndex !== -1) {
-          updatedData.allEntries[allEntriesIndex] = updatedEntry
+      // Update in byTruckType
+      if (updatedData.byTruckType && updatedData.byTruckType[type]) {
+        updatedData.byTruckType[type][index] = updatedEntry
+      }
+
+      // Update in allEntries - find by matching original entry
+      if (updatedData.allEntries) {
+        const originalEntry = data.byTruckType?.[type]?.[index]
+        if (originalEntry) {
+          const allEntriesIndex = updatedData.allEntries.findIndex(
+            (entry) =>
+              entry.jobName === originalEntry.jobName &&
+              entry.truckDriver === originalEntry.truckDriver &&
+              entry.time === originalEntry.time,
+          )
+          if (allEntriesIndex !== -1) {
+            updatedData.allEntries[allEntriesIndex] = updatedEntry
+          }
         }
       }
-    }
 
-    onUpdateData(updatedData)
-  }
+      onUpdateData(updatedData)
+    },
+    [data, onUpdateData],
+  )
 
-  const handleDeleteEntry = (index: number, type: TruckType) => {
-    const updatedData = { ...data }
-
-    // Remove from byTruckType
-    if (updatedData.byTruckType && updatedData.byTruckType[type]) {
-      const entryToDelete = updatedData.byTruckType[type][index]
-      updatedData.byTruckType[type].splice(index, 1)
-
-      // Remove from allEntries
-      if (updatedData.allEntries && entryToDelete) {
-        updatedData.allEntries = updatedData.allEntries.filter(
-          (entry) => !(entry.jobName === entryToDelete.jobName && entry.truckDriver === entryToDelete.truckDriver),
-        )
-      }
-    }
-
-    onUpdateData(updatedData)
-    toast({
-      title: "Entry deleted",
-      description: "The schedule entry has been removed.",
-    })
-  }
-
-  const handleDuplicateEntry = (index: number, type: TruckType) => {
-    const updatedData = { ...data }
-
-    if (updatedData.byTruckType && updatedData.byTruckType[type]) {
-      const originalEntry = updatedData.byTruckType[type][index]
-      const duplicatedEntry = {
-        ...originalEntry,
-        jobName: `${originalEntry.jobName} (Copy)`,
-        truckDriver: "TBD",
+  const handleDeleteEntry = useCallback(
+    (index: number, type: TruckType) => {
+      if (!onUpdateData || typeof onUpdateData !== "function") {
+        console.error("onUpdateData is not a function:", onUpdateData)
+        return
       }
 
-      // Add to byTruckType
-      updatedData.byTruckType[type].push(duplicatedEntry)
+      const updatedData = { ...data }
 
-      // Add to allEntries
-      if (updatedData.allEntries) {
+      // Remove from byTruckType
+      if (updatedData.byTruckType && updatedData.byTruckType[type]) {
+        const entryToDelete = updatedData.byTruckType[type][index]
+        updatedData.byTruckType[type].splice(index, 1)
+
+        // Remove from allEntries
+        if (updatedData.allEntries && entryToDelete) {
+          updatedData.allEntries = updatedData.allEntries.filter(
+            (entry) => !(entry.jobName === entryToDelete.jobName && entry.truckDriver === entryToDelete.truckDriver),
+          )
+        }
+      }
+
+      onUpdateData(updatedData)
+      toast({
+        title: "Entry deleted",
+        description: "The schedule entry has been removed.",
+      })
+    },
+    [data, onUpdateData, toast],
+  )
+
+  const handleDuplicateEntry = useCallback(
+    (index: number, type: TruckType) => {
+      if (!onUpdateData || typeof onUpdateData !== "function") {
+        console.error("onUpdateData is not a function:", onUpdateData)
+        return
+      }
+
+      const updatedData = { ...data }
+
+      if (updatedData.byTruckType && updatedData.byTruckType[type]) {
+        const originalEntry = updatedData.byTruckType[type][index]
+        const duplicatedEntry = {
+          ...originalEntry,
+          jobName: `${originalEntry.jobName} (Copy)`,
+          truckDriver: "TBD",
+        }
+
+        // Add to byTruckType
+        if (!updatedData.byTruckType) {
+          updatedData.byTruckType = {}
+        }
+        if (!updatedData.byTruckType[type]) {
+          updatedData.byTruckType[type] = []
+        }
+        updatedData.byTruckType[type].push(duplicatedEntry)
+
+        // Add to allEntries
+        if (!updatedData.allEntries) {
+          updatedData.allEntries = []
+        }
         updatedData.allEntries.push(duplicatedEntry)
       }
-    }
 
-    onUpdateData(updatedData)
-    toast({
-      title: "Entry duplicated",
-      description: "A copy of the entry has been created.",
-    })
-  }
+      onUpdateData(updatedData)
+      toast({
+        title: "Entry duplicated",
+        description: "A copy of the entry has been created.",
+      })
+    },
+    [data, onUpdateData, toast],
+  )
 
-  const handleAddEntry = (type: TruckType) => {
-    const updatedData = { ...data }
-    const newEntry = createBlankEntry(type)
+  const handleAddEntry = useCallback(
+    (type: TruckType) => {
+      if (!onUpdateData || typeof onUpdateData !== "function") {
+        console.error("onUpdateData is not a function:", onUpdateData)
+        return
+      }
 
-    // Add to byTruckType
-    if (!updatedData.byTruckType) {
-      updatedData.byTruckType = {}
-    }
-    if (!updatedData.byTruckType[type]) {
-      updatedData.byTruckType[type] = []
-    }
-    updatedData.byTruckType[type].push(newEntry)
+      const updatedData = { ...data }
+      const newEntry = createBlankEntry(type)
 
-    // Add to allEntries
-    if (!updatedData.allEntries) {
-      updatedData.allEntries = []
-    }
-    updatedData.allEntries.push(newEntry)
+      // Add to byTruckType
+      if (!updatedData.byTruckType) {
+        updatedData.byTruckType = {}
+      }
+      if (!updatedData.byTruckType[type]) {
+        updatedData.byTruckType[type] = []
+      }
+      updatedData.byTruckType[type].push(newEntry)
 
-    onUpdateData(updatedData)
-    toast({
-      title: "Entry added",
-      description: `A new ${type} entry has been created.`,
-    })
-  }
+      // Add to allEntries
+      if (!updatedData.allEntries) {
+        updatedData.allEntries = []
+      }
+      updatedData.allEntries.push(newEntry)
 
-  const handleSaveChanges = () => {
+      onUpdateData(updatedData)
+      toast({
+        title: "Entry added",
+        description: `A new ${type} entry has been created.`,
+      })
+    },
+    [data, onUpdateData, toast],
+  )
+
+  const handleSaveChanges = useCallback(() => {
     // This would typically save to a backend or local storage
     toast({
       title: "Changes saved",
       description: "All schedule changes have been saved successfully.",
     })
-  }
+  }, [toast])
 
   // Handle export to PDF
   const handleExportToPDF = async () => {
@@ -850,6 +1020,7 @@ export function ScheduleReport({ data, onUpdateData }: ScheduleReportProps) {
         totalOrders,
       }
 
+      const reportDate = extractReportDate(data)
       const filenameDateString = format(reportDate, "yyyy-MM-dd")
       const filename = `Spallina-Schedule-${filenameDateString}`
 
@@ -897,6 +1068,7 @@ export function ScheduleReport({ data, onUpdateData }: ScheduleReportProps) {
         totalOrders,
       }
 
+      const reportDate = extractReportDate(data)
       const filenameDateString = format(reportDate, "yyyy-MM-dd")
       const filename = `Spallina-Schedule-${filenameDateString}-Print`
 
@@ -920,38 +1092,44 @@ export function ScheduleReport({ data, onUpdateData }: ScheduleReportProps) {
   }
 
   // Create driver summary data
-  const driverSummaryEntries =
-    data.allEntries
-      ?.filter((entry) => entry.truckDriver && entry.truckDriver !== "TBD" && entry.truckDriver.trim() !== "")
-      .map((entry) => {
-        // Calculate start time based on whether truck is Spallina with offset
-        let startTime = entry.showUpTime || ""
-        const displayTime = entry.time || ""
+  const driverSummaryEntries = useMemo(() => {
+    return (
+      data.allEntries
+        ?.filter((entry) => entry.truckDriver && entry.truckDriver !== "TBD" && entry.truckDriver.trim() !== "")
+        .map((entry) => {
+          // Calculate start time based on whether truck is Spallina with offset
+          let startTime = entry.showUpTime || ""
+          const displayTime = entry.time || ""
 
-        if (!startTime && displayTime) {
-          const isSpallinaWithOffset = isSpallinaTruckWithOffset(entry.truckDriver)
+          if (!startTime && displayTime) {
+            const isSpallinaWithOffset = isSpallinaTruckWithOffset(entry.truckDriver)
 
-          if (isSpallinaWithOffset) {
-            // Spallina truck with offset: apply the specific offset from showUpOffset field
-            const offset = entry.showUpOffset ? Number.parseInt(entry.showUpOffset, 10) : 15
-            const formattedTime = convertTo24HourFormat(displayTime)
-            if (formattedTime) {
-              startTime = addMinutesToTimeString(formattedTime, -offset)
+            if (isSpallinaWithOffset) {
+              // Spallina truck with offset: apply the specific offset from showUpOffset field
+              const offset = entry.showUpOffset ? Number.parseInt(entry.showUpOffset, 10) : 15
+              const formattedTime = convertTo24HourFormat(displayTime)
+              if (formattedTime) {
+                startTime = addMinutesToTimeString(formattedTime, -offset)
+              }
+            } else {
+              // Contractor/other truck: start time = load time (NO OFFSET)
+              startTime = convertTo24HourFormat(displayTime) || displayTime
             }
-          } else {
-            // Contractor/other truck: start time = load time (NO OFFSET)
-            startTime = convertTo24HourFormat(displayTime) || displayTime
           }
-        }
 
-        return {
-          name: entry.jobName || "",
-          truckNumber: entry.truckDriver,
-          time: convertTo24HourFormat(startTime) || "",
-        }
-      })
-      .filter((entry) => entry.time) // Only include entries with valid times
-      .sort((a, b) => a.time.localeCompare(b.time)) || []
+          return {
+            name: entry.jobName || "",
+            truckNumber: entry.truckDriver,
+            time: convertTo24HourFormat(startTime) || "",
+          }
+        })
+        .filter((entry) => entry.time) // Only include entries with valid times
+        .sort((a, b) => a.time.localeCompare(b.time)) || []
+    )
+  }, [data.allEntries])
+
+  // Extract report date from the data
+  const reportDate = useMemo(() => extractReportDate(data), [data])
 
   return (
     <div className="space-y-6">
@@ -988,10 +1166,9 @@ export function ScheduleReport({ data, onUpdateData }: ScheduleReportProps) {
       </div>
 
       {/* Contractor Legend */}
-      <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md print:hidden">
+      <div className="mb-4 p-3 bg-yellow-50 border rounded-md print:hidden border-black">
         <p className="text-sm text-yellow-800">
-          <strong>Note:</strong> Contractors are marked with an asterisk (*). Spallina trucks show up 15 minutes before
-          load time, contractors show up at load time.
+          <strong>Note:</strong> Contractors are marked with an asterisk (*).ALL FIELDS NOW EDITABLE.
         </p>
       </div>
 
@@ -1013,7 +1190,7 @@ export function ScheduleReport({ data, onUpdateData }: ScheduleReportProps) {
             value={dispatcherNotes}
             onChange={(e) => setDispatcherNotes(e.target.value)}
             placeholder="Add any special instructions or notes for drivers..."
-            className="mt-1 min-h-[80px] print:border-2 print:border-black print:p-2"
+            className="mt-1 min-h-[80px] border border-gray-200 bg-white p-3 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none print:border-2 print:border-black print:p-2"
           />
         </div>
 
@@ -1036,7 +1213,7 @@ export function ScheduleReport({ data, onUpdateData }: ScheduleReportProps) {
           <h3 className="text-lg font-semibold mb-4 print:text-base print:mb-2 truck-header">
             Spallina Drivers Summary
           </h3>
-          <DriverSummary entries={data.allEntries || []} />
+          <DriverSummary entries={driverSummaryEntries} />
         </div>
       </div>
     </div>

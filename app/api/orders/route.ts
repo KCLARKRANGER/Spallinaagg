@@ -1,33 +1,76 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 
-export async function POST(request: Request) {
+// Mock data for testing
+const mockOrders = [
+  {
+    id: "1",
+    taskName: "MODERN MASONRY",
+    truckType: "Slinger",
+    pitLocation: "SM-WB",
+    shift: "Scheduled",
+    driversAssigned: "SMI95S",
+    dueDate: "Monday, July 28th 2025, 2:00:00 pm -04:00",
+    location: "9560 BIG TREE RD, HEMLOCK, N.Y.",
+    qtyRequired: "1: LD",
+    materialType: "Crushed 1's per Ton",
+    notes: "",
+    numberOfTrucks: 1,
+    intervalBetweenTrucks: 0,
+    showUpTimeOffset: 15,
+  },
+  {
+    id: "2",
+    taskName: "MORRELL BLDRS",
+    truckType: "Slinger",
+    pitLocation: "SM-WB",
+    shift: "Scheduled",
+    driversAssigned: "SMI95S",
+    dueDate: "Monday, July 28th 2025, 12:00:00 pm -04:00",
+    location: "LOTS 22 & 23 PIERCEBROOK EST., CANANDAIGUA, N.Y.",
+    qtyRequired: "2: LD",
+    materialType: "Crushed 1's per Ton",
+    notes: "",
+    numberOfTrucks: 1,
+    intervalBetweenTrucks: 0,
+    showUpTimeOffset: 15,
+  },
+]
+
+export async function GET(request: NextRequest) {
   try {
-    const body = await request.json()
-
-    // Log the incoming data
-    console.log("Received order data:", body)
-
-    // Validate required fields
-    if (!body.client_id || !body.task_id || !body.name) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
-    }
-
-    // Here you would typically process the data, store it, etc.
-    // For now, we'll just acknowledge receipt
+    // Simulate API delay
+    await new Promise((resolve) => setTimeout(resolve, 500))
 
     return NextResponse.json({
       success: true,
-      message: `Successfully received task "${body.name}"`,
-      taskId: body.task_id,
+      data: mockOrders,
+      total: mockOrders.length,
     })
   } catch (error) {
-    console.error("Error processing order:", error)
-    return NextResponse.json(
-      {
-        error: "Failed to process order",
-        details: error instanceof Error ? error.message : String(error),
-      },
-      { status: 500 },
-    )
+    console.error("Error fetching orders:", error)
+    return NextResponse.json({ success: false, error: "Failed to fetch orders" }, { status: 500 })
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+
+    // Simulate processing
+    await new Promise((resolve) => setTimeout(resolve, 300))
+
+    const newOrder = {
+      id: Date.now().toString(),
+      ...body,
+      createdAt: new Date().toISOString(),
+    }
+
+    return NextResponse.json({
+      success: true,
+      data: newOrder,
+    })
+  } catch (error) {
+    console.error("Error creating order:", error)
+    return NextResponse.json({ success: false, error: "Failed to create order" }, { status: 500 })
   }
 }

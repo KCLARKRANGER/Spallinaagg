@@ -1,80 +1,87 @@
 "use client"
 
-import { useState } from "react"
-import { Button } from "@/components/ui/button"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { CheckCircle, XCircle, RefreshCw } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { RefreshCw, Eye, EyeOff } from "lucide-react"
+
+interface EnvVar {
+  name: string
+  value?: string
+  isSet: boolean
+  isPublic: boolean
+}
 
 export function EnvVarChecker() {
+  const [envVars, setEnvVars] = useState<EnvVar[]>([])
   const [isLoading, setIsLoading] = useState(false)
-  const [results, setResults] = useState<any>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [showValues, setShowValues] = useState(false)
 
   const checkEnvVars = async () => {
     setIsLoading(true)
-    setError(null)
-
     try {
       const response = await fetch("/api/check-env")
       const data = await response.json()
-
-      setResults(data)
-
-      if (!response.ok) {
-        setError(data.error || `Error: ${response.status} ${response.statusText}`)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setEnvVars(data.envVars || [])
+    } catch (error) {
+      console.error("Error checking environment variables:", error)
     } finally {
       setIsLoading(false)
     }
   }
 
+  useEffect(() => {
+    checkEnvVars()
+  }, [])
+
+  const maskValue = (value: string) => {
+    if (!value) return ""
+    if (value.length <= 8) return "*".repeat(value.length)
+    return value.substring(0, 4) + "*".repeat(value.length - 8) + value.substring(value.length - 4)
+  }
+
   return (
-    <Card>
+    <Card className="w-full">
       <CardHeader>
-        <CardTitle>Environment Variables Checker</CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle>Environment Variables</CardTitle>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setShowValues(!showValues)}>
+              {showValues ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              {showValues ? "Hide" : "Show"} Values
+            </Button>
+            <Button variant="outline" size="sm" onClick={checkEnvVars} disabled={isLoading}>
+              <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
+          </div>
+        </div>
       </CardHeader>
       <CardContent>
-        <Button onClick={checkEnvVars} disabled={isLoading} className="w-full mb-4">
-          {isLoading ? (
-            <>
-              <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-              Checking...
-            </>
-          ) : (
-            "Check Environment Variables"
-          )}
-        </Button>
-
-        {error && (
-          <Alert variant="destructive" className="mb-4">
-            <AlertTitle>Error</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-
-        {results && (
-          <div className="space-y-2">
-            {Object.entries(results.variables).map(([name, value]: [string, any]) => (
-              <div key={name} className="flex items-center justify-between p-2 border rounded">
-                <span className="font-mono text-sm">{name}</span>
-                {value.exists ? (
-                  <div className="flex items-center text-green-600">
-                    <CheckCircle className="h-4 w-4 mr-1" />
-                    <span className="text-xs">{value.masked ? `${value.preview}...` : "Set"}</span>
-                  </div>
-                ) : (
-                  <div className="flex items-center text-red-600">
-                    <XCircle className="h-4 w-4 mr-1" />
-                    <span className="text-xs">Not Set</span>
-                  </div>
-                )}
+        <div className="space-y-3">
+          {envVars.map((envVar) => (
+            <div key={envVar.name} className="flex items-center justify-between p-3 border rounded-lg">
+              <div className="flex items-center gap-3">
+                <code className="text-sm font-mono bg-gray-100 px-2 py-1 rounded">{envVar.name}</code>
+                <div className="flex gap-2">
+                  <Badge variant={envVar.isSet ? "default" : "destructive"}>{envVar.isSet ? "Set" : "Missing"}</Badge>
+                  {envVar.isPublic && <Badge variant="outline">Public</Badge>}
+                </div>
               </div>
-            ))}
-          </div>
-        )}
+
+              {envVar.isSet && showValues && (
+                <code className="text-sm font-mono text-gray-600">
+                  {envVar.isPublic ? envVar.value : maskValue(envVar.value || "")}
+                </code>
+              )}
+            </div>
+          ))}
+
+          {envVars.length === 0 && !isLoading && (
+            <div className="text-center py-4 text-gray-500">No environment variables found</div>
+          )}
+        </div>
       </CardContent>
     </Card>
   )

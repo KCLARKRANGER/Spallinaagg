@@ -233,7 +233,7 @@ export function DriverSummary({ entries }: DriverSummaryProps) {
   if (uniqueDriverEntries.length === 0) {
     return (
       <div className="text-center text-muted-foreground py-8">
-        <p>No drivers assigned to any jobs yet.</p>
+        <p className="text-black">No drivers assigned to any jobs yet.</p>
       </div>
     )
   }

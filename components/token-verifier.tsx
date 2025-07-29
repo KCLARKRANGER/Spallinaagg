@@ -2,230 +2,158 @@
 
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { RefreshCw, ExternalLink, Check, Copy } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Loader2, CheckCircle, XCircle, Key } from "lucide-react"
+import { useToast } from "@/components/ui/use-toast"
 
 export function TokenVerifier() {
-  const [pythonToken, setPythonToken] = useState("")
-  const [envToken, setEnvToken] = useState("")
-  const [newToken, setNewToken] = useState("")
-  const [isLoading, setIsLoading] = useState(false)
-  const [testResult, setTestResult] = useState<any>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState("compare")
-  const [copied, setCopied] = useState(false)
+  const [token, setToken] = useState("")
+  const [isVerifying, setIsVerifying] = useState(false)
+  const [verificationResult, setVerificationResult] = useState<any>(null)
+  const { toast } = useToast()
 
-  // Function to check if tokens match
-  const tokensMatch = () => {
-    if (!pythonToken || !envToken) return null
-    return pythonToken.trim() === envToken.trim()
-  }
-
-  // Function to test a token
-  const testToken = async (token: string) => {
-    if (!token) {
-      setError("Please enter a token to test")
+  const verifyToken = async () => {
+    if (!token.trim()) {
+      toast({
+        title: "Token Required",
+        description: "Please enter a ClickUp API token to verify",
+        variant: "destructive",
+      })
       return
     }
 
-    setIsLoading(true)
-    setError(null)
-    setTestResult(null)
+    setIsVerifying(true)
+    setVerificationResult(null)
 
     try {
-      const response = await fetch("/api/clickup/test-custom", {
-        method: "POST",
+      // Test the token by making a simple API call to ClickUp
+      const response = await fetch("https://api.clickup.com/api/v2/user", {
         headers: {
+          Authorization: token,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          endpoint: "user",
-          apiToken: token,
-        }),
       })
 
       const data = await response.json()
-      setTestResult(data)
 
-      if (!data.success) {
-        setError(`API Error: ${data.status} ${data.statusText}`)
+      if (response.ok) {
+        setVerificationResult({
+          valid: true,
+          user: data.user,
+          status: response.status,
+        })
+        toast({
+          title: "Token Valid",
+          description: `Successfully authenticated as ${data.user?.username || "Unknown User"}`,
+        })
+      } else {
+        setVerificationResult({
+          valid: false,
+          error: data.err || data.error || "Invalid token",
+          status: response.status,
+        })
+        toast({
+          title: "Token Invalid",
+          description: data.err || data.error || "The provided token is not valid",
+          variant: "destructive",
+        })
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+    } catch (error) {
+      console.error("Token verification error:", error)
+      setVerificationResult({
+        valid: false,
+        error: error instanceof Error ? error.message : "Network error occurred",
+        status: 0,
+      })
+      toast({
+        title: "Verification Failed",
+        description: "Could not verify token due to network error",
+        variant: "destructive",
+      })
     } finally {
-      setIsLoading(false)
+      setIsVerifying(false)
     }
   }
 
-  // Function to copy token to clipboard
-  const copyToClipboard = (token: string) => {
-    navigator.clipboard.writeText(token)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
-
   return (
-    <Card>
+    <Card className="w-full">
       <CardHeader>
-        <CardTitle>ClickUp Token Verifier</CardTitle>
-        <CardDescription>Compare and verify your ClickUp API tokens</CardDescription>
+        <CardTitle className="flex items-center gap-2">
+          <Key className="h-5 w-5" />
+          ClickUp Token Verifier
+        </CardTitle>
       </CardHeader>
-      <CardContent>
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-2 mb-4">
-            <TabsTrigger value="compare">Compare Tokens</TabsTrigger>
-            <TabsTrigger value="new">Get New Token</TabsTrigger>
-          </TabsList>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="token">ClickUp API Token</Label>
+          <Input
+            id="token"
+            type="password"
+            placeholder="pk_..."
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            className="font-mono"
+          />
+          <p className="text-sm text-gray-500">Enter your ClickUp API token to verify it's working correctly</p>
+        </div>
 
-          <TabsContent value="compare" className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="python-token">Token from Python Script</Label>
-              <Input
-                id="python-token"
-                value={pythonToken}
-                onChange={(e) => setPythonToken(e.target.value)}
-                placeholder="Paste the token from your Python script"
-                className="font-mono text-sm"
-              />
-              <p className="text-xs text-muted-foreground">
-                Look for the API token in your Python script (usually in a variable like api_token)
-              </p>
+        <Button onClick={verifyToken} disabled={isVerifying || !token.trim()} className="w-full">
+          {isVerifying ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              Verifying Token...
+            </>
+          ) : (
+            <>
+              <Key className="h-4 w-4 mr-2" />
+              Verify Token
+            </>
+          )}
+        </Button>
+
+        {verificationResult && (
+          <div className="space-y-3 p-4 border rounded-lg">
+            <div className="flex items-center gap-2">
+              {verificationResult.valid ? (
+                <CheckCircle className="h-5 w-5 text-green-500" />
+              ) : (
+                <XCircle className="h-5 w-5 text-red-500" />
+              )}
+              <Badge variant={verificationResult.valid ? "default" : "destructive"}>
+                {verificationResult.valid ? "Valid Token" : "Invalid Token"}
+              </Badge>
+              <Badge variant="outline">Status: {verificationResult.status}</Badge>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="env-token">Token from Environment Variable</Label>
-              <Input
-                id="env-token"
-                value={envToken}
-                onChange={(e) => setEnvToken(e.target.value)}
-                placeholder="Paste the token from your environment variable"
-                className="font-mono text-sm"
-              />
-              <p className="text-xs text-muted-foreground">
-                This is the token set in your CLICKUP_API_TOKEN environment variable
-              </p>
-            </div>
-
-            {pythonToken && envToken && (
-              <Alert variant={tokensMatch() ? "default" : "destructive"}>
-                <AlertTitle>{tokensMatch() ? "Tokens Match" : "Tokens Don't Match"}</AlertTitle>
-                <AlertDescription>
-                  {tokensMatch()
-                    ? "The tokens from your Python script and environment variable are identical."
-                    : "The tokens from your Python script and environment variable are different. This could be causing your authentication issues."}
-                </AlertDescription>
-              </Alert>
+            {verificationResult.valid && verificationResult.user && (
+              <div className="space-y-2">
+                <h4 className="font-medium">User Information:</h4>
+                <div className="text-sm space-y-1">
+                  <p>
+                    <strong>Username:</strong> {verificationResult.user.username}
+                  </p>
+                  <p>
+                    <strong>Email:</strong> {verificationResult.user.email}
+                  </p>
+                  <p>
+                    <strong>ID:</strong> {verificationResult.user.id}
+                  </p>
+                </div>
+              </div>
             )}
 
-            <Button
-              onClick={() => testToken(pythonToken || envToken)}
-              disabled={isLoading || (!pythonToken && !envToken)}
-              className="w-full"
-            >
-              {isLoading ? (
-                <>
-                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                  Testing...
-                </>
-              ) : (
-                "Test Token"
-              )}
-            </Button>
-          </TabsContent>
-
-          <TabsContent value="new" className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="new-token">New API Token</Label>
-              <div className="flex">
-                <Input
-                  id="new-token"
-                  value={newToken}
-                  onChange={(e) => setNewToken(e.target.value)}
-                  placeholder="Paste your new ClickUp API token here"
-                  className="font-mono text-sm flex-1"
-                />
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="ml-2"
-                  onClick={() => copyToClipboard(newToken)}
-                  disabled={!newToken}
-                >
-                  {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                </Button>
+            {!verificationResult.valid && (
+              <div className="space-y-2">
+                <h4 className="font-medium text-red-600">Error:</h4>
+                <p className="text-sm text-red-600">{verificationResult.error}</p>
               </div>
-              <p className="text-xs text-muted-foreground">Generate a new API token from ClickUp and paste it here</p>
-            </div>
-
-            <div className="space-y-2">
-              <h3 className="text-sm font-medium">How to Generate a New API Token:</h3>
-              <ol className="text-sm space-y-2 list-decimal list-inside">
-                <li>Log in to your ClickUp account</li>
-                <li>Click on your profile picture in the bottom left</li>
-                <li>Go to "Settings"</li>
-                <li>Click on "Apps" in the left sidebar</li>
-                <li>Scroll down to "API Token" section</li>
-                <li>Click "Generate" to create a new token</li>
-                <li>Copy the token and paste it above</li>
-              </ol>
-
-              <div className="mt-4">
-                <a
-                  href="https://app.clickup.com/settings/apps"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline flex items-center"
-                >
-                  Go to ClickUp Apps Settings
-                  <ExternalLink className="h-3 w-3 ml-1" />
-                </a>
-              </div>
-            </div>
-
-            <Button onClick={() => testToken(newToken)} disabled={isLoading || !newToken} className="w-full">
-              {isLoading ? (
-                <>
-                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                  Testing...
-                </>
-              ) : (
-                "Test New Token"
-              )}
-            </Button>
-          </TabsContent>
-        </Tabs>
-
-        {error && (
-          <Alert variant="destructive" className="mt-4">
-            <AlertTitle>Error</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-
-        {testResult && testResult.success && (
-          <Alert variant="default" className="mt-4">
-            <AlertTitle>Success!</AlertTitle>
-            <AlertDescription>
-              The token was successfully authenticated with ClickUp.
-              {testResult.data?.user && (
-                <div className="mt-2">
-                  <p>User: {testResult.data.user.username}</p>
-                  <p>Email: {testResult.data.user.email}</p>
-                </div>
-              )}
-            </AlertDescription>
-          </Alert>
+            )}
+          </div>
         )}
       </CardContent>
-      <CardFooter className="flex justify-between">
-        <p className="text-xs text-muted-foreground">
-          API tokens can expire or be revoked. If you're having issues, try generating a new token.
-        </p>
-      </CardFooter>
     </Card>
   )
 }

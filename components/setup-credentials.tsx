@@ -2,93 +2,143 @@
 
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Copy, Check, ExternalLink } from "lucide-react"
+import { Textarea } from "@/components/ui/textarea"
+import { Badge } from "@/components/ui/badge"
+import { Copy, Check, ExternalLink, Settings } from "lucide-react"
+import { useToast } from "@/components/ui/use-toast"
 
 export function SetupCredentials() {
-  const [copied, setCopied] = useState<Record<string, boolean>>({})
-  const [showInstructions, setShowInstructions] = useState(false)
+  const [copied, setCopied] = useState<string | null>(null)
+  const { toast } = useToast()
 
-  const credentials = {
-    CLICKUP_CLIENT_ID: "JSB26TARGIDNQAWU2Q2P3FGVFM2XA6MH",
-    CLICKUP_CLIENT_SECRET: "TQTC0LRZ378OC3TG52V5Q9353PRSIOREIAMYCEBOE2MOQLOVEYJALHR18ATQOA9G",
-    NEXT_PUBLIC_APP_URL: "https://v0-new-project-ol9hppaackj.vercel.app",
+  const envVars = [
+    {
+      name: "CLICKUP_CLIENT_ID",
+      description: "Your ClickUp app's Client ID",
+      example: "ABC123DEF456",
+      required: true,
+    },
+    {
+      name: "CLICKUP_CLIENT_SECRET",
+      description: "Your ClickUp app's Client Secret",
+      example: "XYZ789UVW012",
+      required: true,
+    },
+    {
+      name: "CLICKUP_API_TOKEN",
+      description: "Your personal ClickUp API token",
+      example: "pk_12345678_ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+      required: true,
+    },
+    {
+      name: "NEXT_PUBLIC_APP_URL",
+      description: "Your app's public URL (for OAuth redirects)",
+      example: "https://your-app.vercel.app",
+      required: false,
+    },
+  ]
+
+  const copyToClipboard = async (text: string, name: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(name)
+      setTimeout(() => setCopied(null), 2000)
+      toast({
+        title: "Copied to clipboard",
+        description: `${name} has been copied`,
+      })
+    } catch (error) {
+      toast({
+        title: "Copy failed",
+        description: "Could not copy to clipboard",
+        variant: "destructive",
+      })
+    }
   }
 
-  const copyToClipboard = (key: string, value: string) => {
-    navigator.clipboard.writeText(value)
-    setCopied({ ...copied, [key]: true })
-    setTimeout(() => {
-      setCopied({ ...copied, [key]: false })
-    }, 2000)
-  }
+  const envFileContent = envVars.map((envVar) => `${envVar.name}=${envVar.example}`).join("\n")
 
   return (
-    <Card>
+    <Card className="w-full">
       <CardHeader>
-        <CardTitle>ClickUp OAuth Credentials</CardTitle>
-        <CardDescription>Set up these credentials in your Vercel project</CardDescription>
+        <CardTitle className="flex items-center gap-2">
+          <Settings className="h-5 w-5" />
+          Setup ClickUp Credentials
+        </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <Alert className="bg-amber-50 border-amber-200">
-          <AlertTitle className="text-amber-800">Important</AlertTitle>
-          <AlertDescription className="text-amber-700">
-            You need to set these environment variables in your Vercel project for the OAuth flow to work.
-          </AlertDescription>
-        </Alert>
+      <CardContent className="space-y-6">
+        <div className="space-y-4">
+          <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <h3 className="font-medium text-blue-900 mb-2">Getting Started</h3>
+            <ol className="text-sm text-blue-800 space-y-1 list-decimal list-inside">
+              <li>Create a ClickUp app in your workspace settings</li>
+              <li>Generate a personal API token from your ClickUp profile</li>
+              <li>Add the environment variables below to your project</li>
+              <li>Restart your development server</li>
+            </ol>
+          </div>
 
-        {Object.entries(credentials).map(([key, value]) => (
-          <div key={key} className="space-y-2">
-            <Label htmlFor={key}>{key}</Label>
-            <div className="flex">
-              <Input id={key} value={value} readOnly className="font-mono text-sm flex-1" />
-              <Button variant="outline" size="icon" className="ml-2" onClick={() => copyToClipboard(key, value)}>
-                {copied[key] ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+          <div className="space-y-4">
+            <h3 className="font-medium">Required Environment Variables</h3>
+            {envVars.map((envVar) => (
+              <div key={envVar.name} className="space-y-2 p-3 border rounded-lg">
+                <div className="flex items-center gap-2">
+                  <Label className="font-mono text-sm">{envVar.name}</Label>
+                  {envVar.required && (
+                    <Badge variant="destructive" className="text-xs">
+                      Required
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-sm text-gray-600">{envVar.description}</p>
+                <div className="flex items-center gap-2">
+                  <Input value={envVar.example} readOnly className="font-mono text-xs bg-gray-50" />
+                  <Button variant="outline" size="sm" onClick={() => copyToClipboard(envVar.example, envVar.name)}>
+                    {copied === envVar.name ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>Complete .env.local file</Label>
+              <Button variant="outline" size="sm" onClick={() => copyToClipboard(envFileContent, ".env.local content")}>
+                {copied === ".env.local content" ? (
+                  <Check className="h-4 w-4 mr-2" />
+                ) : (
+                  <Copy className="h-4 w-4 mr-2" />
+                )}
+                Copy All
               </Button>
             </div>
+            <Textarea value={envFileContent} readOnly className="font-mono text-xs bg-gray-50 min-h-[120px]" />
           </div>
-        ))}
 
-        <Button variant="outline" className="w-full mt-4" onClick={() => setShowInstructions(!showInstructions)}>
-          {showInstructions ? "Hide Instructions" : "Show Setup Instructions"}
-        </Button>
-
-        {showInstructions && (
-          <div className="mt-4 space-y-4 border rounded-md p-4">
-            <h3 className="font-medium">How to Set Up Environment Variables in Vercel</h3>
-
-            <ol className="space-y-2 list-decimal list-inside">
-              <li>Go to your Vercel dashboard</li>
-              <li>Select your project</li>
-              <li>Click on "Settings" tab</li>
-              <li>Select "Environment Variables" from the left sidebar</li>
-              <li>Add each of the above variables with their values</li>
-              <li>Click "Save" to apply the changes</li>
-              <li>Redeploy your application for the changes to take effect</li>
-            </ol>
-
-            <div className="mt-4">
-              <a
-                href="https://vercel.com/dashboard"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary hover:underline flex items-center"
-              >
-                Go to Vercel Dashboard
-                <ExternalLink className="h-3 w-3 ml-1" />
-              </a>
-            </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => window.open("https://app.clickup.com/settings/apps", "_blank")}
+              className="flex items-center gap-2"
+            >
+              <ExternalLink className="h-4 w-4" />
+              ClickUp Apps Settings
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => window.open("https://app.clickup.com/settings/profile", "_blank")}
+              className="flex items-center gap-2"
+            >
+              <ExternalLink className="h-4 w-4" />
+              Generate API Token
+            </Button>
           </div>
-        )}
+        </div>
       </CardContent>
-      <CardFooter>
-        <p className="text-xs text-muted-foreground">
-          After setting up these variables, you'll need to redeploy your application.
-        </p>
-      </CardFooter>
     </Card>
   )
 }
