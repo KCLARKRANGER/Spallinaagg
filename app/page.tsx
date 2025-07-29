@@ -1,28 +1,33 @@
 "use client"
 
 import { useState } from "react"
+import { Button } from "@/components/ui/button"
 import { ScheduleUploader } from "@/components/schedule-uploader"
 import { ScheduleReport } from "@/components/schedule-report"
-import { Button } from "@/components/ui/button"
+import type { ScheduleData } from "@/types/schedule"
 import { Truck } from "lucide-react"
 import Link from "next/link"
 import Image from "next/image"
-import type { ScheduleData } from "@/types/schedule"
 
 export default function Home() {
   const [scheduleData, setScheduleData] = useState<ScheduleData | null>(null)
 
   const handleDataProcessed = (data: ScheduleData) => {
+    console.log("Data processed:", data)
     setScheduleData(data)
   }
 
-  const handleDataUpdate = (updatedData: ScheduleData) => {
+  const handleUpdateData = (updatedData: ScheduleData) => {
     setScheduleData(updatedData)
+  }
+
+  if (scheduleData) {
+    return <ScheduleReport data={scheduleData} onUpdateData={handleUpdateData} />
   }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-      <div className="container mx-auto px-4 py-8 bg-gray-100">
+      <div className="container mx-auto px-4 py-8">
         {/* Header */}
         <div className="flex justify-between items-center mb-8">
           <div className="flex items-center space-x-4">
@@ -47,13 +52,16 @@ export default function Home() {
         </div>
 
         {/* Main Content */}
-        {!scheduleData ? (
-          <div className="max-w-4xl mx-auto">
+        <div className="max-w-4xl mx-auto">
+          <div className="bg-white rounded-lg shadow-lg p-8">
+            <div className="text-center mb-8">
+              <h2 className="text-2xl font-semibold text-gray-900 mb-4">Upload Schedule File</h2>
+              <p className="text-gray-600">Upload your Excel or CSV file to generate the daily trucking schedule</p>
+            </div>
+
             <ScheduleUploader onDataProcessed={handleDataProcessed} />
           </div>
-        ) : (
-          <ScheduleReport data={scheduleData} onUpdateData={handleDataUpdate} />
-        )}
+        </div>
       </div>
     </div>
   )

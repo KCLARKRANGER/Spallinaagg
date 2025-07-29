@@ -540,35 +540,13 @@ function TruckTypeSection({
           onUpdateEntry(updatedEntry, index, type)
         },
         showUpTime: (value: string) => {
+          // INDEPENDENT EDITING: Only update show-up time, don't change load time
           const updatedEntry = { ...entry, showUpTime: value }
-          // When show-up time changes, recalculate load time if needed
-          const isSpallinaWithOffset = isSpallinaTruckWithOffset(updatedEntry.truckDriver)
-          if (isSpallinaWithOffset) {
-            const offset = updatedEntry.showUpOffset ? Number.parseInt(updatedEntry.showUpOffset, 10) : 15
-            const formattedTime = convertTo24HourFormat(value)
-            if (formattedTime) {
-              updatedEntry.time = addMinutesToTimeString(formattedTime, offset)
-            }
-          } else {
-            // For contractors, load time equals show-up time
-            updatedEntry.time = convertTo24HourFormat(value) || value
-          }
           onUpdateEntry(updatedEntry, index, type)
         },
         time: (value: string) => {
+          // INDEPENDENT EDITING: Only update load time, don't change show-up time
           const updatedEntry = { ...entry, time: value }
-          // When load time changes, recalculate show-up time if needed
-          const isSpallinaWithOffset = isSpallinaTruckWithOffset(updatedEntry.truckDriver)
-          if (isSpallinaWithOffset) {
-            const offset = updatedEntry.showUpOffset ? Number.parseInt(updatedEntry.showUpOffset, 10) : 15
-            const formattedTime = convertTo24HourFormat(value)
-            if (formattedTime) {
-              updatedEntry.showUpTime = addMinutesToTimeString(formattedTime, -offset)
-            }
-          } else {
-            // For contractors, show-up time equals load time
-            updatedEntry.showUpTime = convertTo24HourFormat(value) || value
-          }
           onUpdateEntry(updatedEntry, index, type)
         },
         location: (value: string) => {
@@ -577,11 +555,11 @@ function TruckTypeSection({
         },
         truckDriver: (value: string) => {
           const updatedEntry = { ...entry, truckDriver: value }
-          // When driver changes, recalculate show-up time based on new driver type
-          const isSpallinaWithOffset = isSpallinaTruckWithOffset(value)
-          const displayTime = updatedEntry.time || ""
+          // When driver changes, only recalculate show-up time if it's currently empty
+          if (!updatedEntry.showUpTime && updatedEntry.time) {
+            const isSpallinaWithOffset = isSpallinaTruckWithOffset(value)
+            const displayTime = updatedEntry.time
 
-          if (displayTime) {
             if (isSpallinaWithOffset) {
               const offset = updatedEntry.showUpOffset ? Number.parseInt(updatedEntry.showUpOffset, 10) : 15
               const formattedTime = convertTo24HourFormat(displayTime)
@@ -668,10 +646,10 @@ function TruckTypeSection({
                 }
               }
 
-              // Calculate show-up time based on whether truck is Spallina with offset
+              // Use the stored show-up time or calculate it only if it's empty
               let showUpTime = entry.showUpTime || ""
 
-              // If show-up time is not manually set and we have a load time, calculate it
+              // If show-up time is not set and we have a load time, calculate it once
               if (!showUpTime && displayTime) {
                 const isSpallinaWithOffset = isSpallinaTruckWithOffset(entry.truckDriver)
 
@@ -1097,7 +1075,7 @@ export function ScheduleReport({ data, onUpdateData }: ScheduleReportProps) {
       data.allEntries
         ?.filter((entry) => entry.truckDriver && entry.truckDriver !== "TBD" && entry.truckDriver.trim() !== "")
         .map((entry) => {
-          // Calculate start time based on whether truck is Spallina with offset
+          // Use the stored show-up time or calculate it if empty
           let startTime = entry.showUpTime || ""
           const displayTime = entry.time || ""
 
@@ -1168,7 +1146,8 @@ export function ScheduleReport({ data, onUpdateData }: ScheduleReportProps) {
       {/* Contractor Legend */}
       <div className="mb-4 p-3 bg-yellow-50 border rounded-md print:hidden border-black">
         <p className="text-sm text-yellow-800">
-          <strong>Note:</strong> Contractors are marked with an asterisk (*).ALL FIELDS NOW EDITABLE.
+          <strong>Note:</strong> Start Time and Load Time can now be edited independently. Changes to one field will not
+          automatically update the other.
         </p>
       </div>
 
