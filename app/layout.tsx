@@ -5,7 +5,6 @@ import "./globals.css"
 export const metadata: Metadata = {
   title: "Aggregate and Concrete Scheduler",
   description: "Spallina Asphalt scheduling application for aggregate and concrete deliveries",
-    generator: 'v0.dev'
 }
 
 export default function RootLayout({
